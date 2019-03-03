@@ -113,3 +113,53 @@
           (if (funcall fn obj wins)
               (setq wins obj)))
         wins)))
+
+(defun mostn (fn lst);;获得列表中元素被fn调用后，返回值最大的所有元素组成的子列表和这个最大值
+  (if (null lst)
+      (values nil nil)
+      (let ((result (list (car lst)))
+            (max (funcall fn (car lst))))
+        (dolist (obj (cdr lst))
+          (let ((score (funcall fn obj)))
+            (cond ((> score max)
+                   (setq max score
+                         result (list obj)))
+                  ((= score max)
+                   (push obj result)))))
+        (values (nreverse result) max))))
+
+(defun mapa-b (fn a b &optional (step 1));;从a到b步长step得到的数作为参数调用fn，收集结果变成列表返回
+  (do ((i a (+ i step))
+       (result nil))
+      ((> i b) (nreverse result))
+    (push (funcall fn i) result)))
+
+(defun map0-n (fn n);;从0到n步长1得到的数作为参数调用fn，收集结果变成列表返回
+  (mapa-b fn 0 n))
+
+(defun map1-n (fn n);;从1到n步长1得到的数作为参数调用fn，收集结果变成列表返回
+  (mapa-b fn 1 n))
+
+(defun map-> (fn start test-fn succ-fn);;初始值为start，下一个值为以循环变量为参数调用succ-fn后得到的结果，每次以循环变量为参数调用test-fn所得到的结果作为判断循环是否结束
+  (do ((i start (funcall succ-fn i))
+       (result nil))
+      ((funcall test-fn i) (nreverse result))
+    (push (funcall fn i) result)))
+
+(defun mappend (fn &rest lsts);;以lsts中的元素为参数调用fn，得到的结果作为元素，形成列表返回
+  (apply #'append (apply #'mapcar fn lsts)))
+
+(defun mapcars (fn &rest lsts);;同时对多个列表应用fn，并将结果收集成一个列表返回
+  (let ((result nil))
+    (dolist (lst lsts)
+      (dolist (obj lst)
+        (push (funcall fn obj) result)))
+    (nreverse result)))
+
+(defun rmapcar (fn &rest args);;遍历树结构的每一个元素，并在其上调用fn
+  (if (some #'atom args)
+      (apply fn args)
+      (apply #'mapcar
+             #'(lambda (&rest args)
+                 (apply #'rmapcar fn args))
+             args)))
