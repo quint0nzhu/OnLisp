@@ -63,7 +63,7 @@
                                (cons (car tree) acc)))))))
     (rec tree nil)))
 
-(defun find2 (fn lst)
+(defun find2 (fn lst);;从lst中找一个元素，使得fn用它作为参数调用后返回结果不为nil，返回两个对象：该元素和fn以该元素为参数调用后的结果
   (if (null lst)
       nil
       (let ((val (funcall fn (car lst))))
@@ -71,15 +71,45 @@
             (values (car lst) val)
             (find2 fn (cdr lst))))))
 
-(defun before (x y lst &key (test #'eql))
+(defun before (x y lst &key (test #'eql));;如果在列表中x在y的前面则返回x开头的子列表，否则返回nil
   (and lst
        (let ((first (car lst)))
          (cond ((funcall test y first) nil)
                ((funcall test x first) lst)
                (t (before x y (cdr lst) :test test))))))
 
-(defun after (x y lst &key (test #'eql))
+(defun after (x y lst &key (test #'eql));;如果在列表中x在y的后面则返回x开头的子列表，否则返回nil
   (let ((rest (before y x lst :test test)))
     (and rest (member x rest :test test))))
 
+(defun duplicate (obj lst &key (test #'eql));;判断obj在lst列表中是否有重复
+  (member obj (cdr (member obj lst :test test))
+          :test test))
 
+(defun split-if (fn lst);;lst中某一个元素，作为fn的参数调用后，如果返回t，则从该元素开始把lst列表断开，变成两个子列表
+  (let ((acc nil))
+    (do ((src lst (cdr src)))
+        ((or (null src) (funcall fn (car src)))
+         (values (nreverse acc) src))
+      (push (car src) acc))))
+
+(defun most (fn lst);;找到lst中一个元素使以它为参数调用fn得到的值最大，返回该元素及那个最大值，相同时，返回先出现的元素
+  (if (null lst)
+      (values nil nil)
+      (let* ((wins (car lst))
+             (max (funcall fn wins)))
+        (dolist (obj (cdr lst))
+          (let ((score (funcall fn obj)))
+            (when (> score max)
+              (setq wins obj
+                    max score))))
+        (values wins max))))
+
+(defun best (fn lst);;返回lst中的某一个元素，该元素在fn调用下值最大，fn为二元谓词，作用于列表中的两个元素
+  (if (null lst)
+      nil
+      (let ((wins (car lst)))
+        (dolist (obj (cdr lst))
+          (if (funcall fn obj wins)
+              (setq wins obj)))
+        wins)))
