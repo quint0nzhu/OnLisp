@@ -1,6 +1,33 @@
 ;;author: quinton
 ;;date: 2019-03-02
-;;this program is the source code of book on lisp chapter 4
+;;this program is the source code of book on lisp
+
+(defun make-dbms (db);;构造一个数据库，自带三个函数闭包
+  (list
+   #'(lambda (key)
+       (cdr (assoc key db)))
+   #'(lambda (key val)
+       (push (cons key val) db)
+       key)
+   #'(lambda (key)
+       (setf db (delete key db :key #'car))
+       key)
+   ))
+
+(defun bad-reverse (lst);;逆序一个列表，不好的实现
+  (let* ((len (length lst))
+         (ilimit (truncate (/ len 2))))
+    (do ((i 0 (1+ i))
+         (j (1- len) (1- j)))
+        ((>= i ilimit))
+      (rotatef (nth i lst) (nth j lst)))))
+
+(defun good-reverse (lst);;逆序一个列表，好的实现
+  (labels ((rev (lst acc)
+             (if (null lst)
+                 acc
+                 (rev (cdr lst) (cons (car lst) acc)))))
+    (rev lst nil)))
 
 (proclaim '(inline last1 single append1 conc1 mklist));;声明一些简单的函数为内联函数
 
@@ -163,3 +190,306 @@
              #'(lambda (&rest args)
                  (apply #'rmapcar fn args))
              args)))
+
+(defun readlist (&rest args);;读入一行并以列表形式返回
+  (values (read-from-string
+           (concatenate 'string "("
+                        (apply #'read-line args)
+                        ")"))))
+
+(defun prompt (&rest args);;打印一行提示符
+  (apply #'format *query-io* args)
+  (read *query-io*))
+
+(defun break-loop (fn quit &rest args);;模拟Lisp的toplevel环境
+  (format *query-io* "Entering break-loop.'~%")
+  (loop
+    (let ((in (apply #'prompt args)))
+      (if (funcall quit in)
+          (return)
+          (format *query-io* "~A~%" (funcall fn in))))))
+
+(defun mkstr (&rest args);;构造一个字符串
+  (with-output-to-string (s)
+    (dolist (a args) (princ a s))))
+
+(defun symb (&rest args);;构造一个符号
+  (values (intern (apply #'mkstr args))))
+
+(defun reread (&rest args);;接受一系列对象，并打印重读它们
+  (values (read-from-string (apply #'mkstr args))))
+
+(defun explode (sym);;返回一个由该符号名称里的字符所组成的列表
+  (map 'list #'(lambda (c)
+                 (intern (make-string 1
+                                      :initial-element c)))
+       (symbol-name sym)))
+
+(defvar *!equivs* (make-hash-table));;建立一个哈希表，保存函数和它对应的破坏性版本，以非破坏性版本为键
+
+(defun ! (fn);;返回函数的破坏性版本
+  (or (gethash fn *!equivs*) fn))
+
+(defun def! (fn fn!);;更新或设置一个函数的破坏性版本
+  (setf (gethash fn *!equivs*) fn!))
+
+(defun memoize (fn);;函数第一次运行后，会把结果存入哈希表中，下次运行时，直接从哈希表中查找
+  (let ((cache (make-hash-table :test #'equal)))
+    #'(lambda (&rest args)
+        (multiple-value-bind (val win) (gethash args cache)
+          (if win
+              val
+              (setf (gethash args cache)
+                    (apply fn args)))))))
+
+(defun compose (&rest fns);;复合函数调用，最后个函数可以有多个参数，其他的函数只能有一个参数
+  (if fns
+      (let ((fn1 (car (last fns)))
+            (fns (butlast fns)))
+        #'(lambda (&rest args)
+            (reduce #'funcall fns
+                    :from-end t
+                    :initial-value (apply fn1 args))))
+      #'identity))
+
+(defun fif (if then &optional else);;函数if调用后如果返回真则再调用函数then，如果不为真，可以再调用函数else
+  #'(lambda (x)
+      (if (funcall if x)
+          (funcall then x)
+          (if else (funcall else x)))))
+
+(defun fint (fn &rest fns);;几个函数调用结果的交集
+  (if (null fns)
+      fn
+      (let ((chain (apply #'fint fns)))
+        #'(lambda (x)
+            (and (funcall fn x) (funcall chain x))))))
+
+(defun fun (fn &rest fns);;几个函数调用结果的合集
+  (if (null fns)
+      fn
+      (let ((chain (apply #'fun fns)))
+        #'(lambda (x)
+            (or (funcall fn x) (funcall chain x))))))
+
+(defun lrec (rec &optional base);;用来定义线性列表的递归函数的函数
+  (labels ((self (lst)
+             (if (null lst)
+                 (if (functionp base)
+                     (funcall base)
+                     base)
+                 (funcall rec (car lst)
+                          #'(lambda ()
+                              (self (cdr lst)))))))
+    #'self))
+
+(defun ttrav (rec &optional (base #'identity));;在树结构上进行递归操作
+  (labels ((self (tree)
+             (if (atom tree)
+                 (if (functionp base)
+                     (funcall base tree)
+                     base)
+                 (funcall rec (self (car tree))
+                          (if (cdr tree)
+                              (self (cdr tree)))))))
+    #'self))
+
+(defun trec (rec &optional (base #'identity));;在树形结构上遍历
+  (labels
+      ((self (tree)
+         (if (atom tree)
+             (if (functionp base)
+                 (funcall base tree)
+                 base)
+             (funcall rec tree
+                      #'(lambda ()
+                          (self (car tree)))
+                      #'(lambda ()
+                          (if (cdr tree)
+                              (self (cdr tree))))))))
+    #'self))
+
+(defstruct node contents yes no);;定义一个node结点结构体
+
+(defvar *nodes* (make-hash-table));;定义一个存放node的哈希表
+
+(defun defnode (name conts &optional yes no);;生成一个node并放入哈希表中
+  (setf (gethash name *nodes*)
+        (make-node :contents conts
+                   :yes yes
+                   :no no)))
+
+(defun run-node (name);;用来遍历树的函数
+  (let ((n (gethash name *nodes*)))
+        (cond ((node-yes n)
+               (format t "~A~%>> " (node-contents n))
+               (case (read)
+                 (yes (run-node (node-yes n)))
+                 (t (run-node (node-no n)))))
+              (t (node-contents n)))))
+
+(defun defnode (name conts &optional yes no);;这个版本不用再定义node数据结构了，也不用单独定义函数来遍历这些结点，节点成为闭包，只要调用闭包就可以了
+  (setf (gethash name *nodes*)
+        (if yes
+            #'(lambda ()
+                (format t "~A~%>> " conts)
+                (case (read)
+                  (yes (funcall (gethash yes *nodes*)))
+                  (t (funcall (gethash no *nodes*)))))
+            #'(lambda() conts))))
+
+(defvar *nodes-list* nil);;定义一个列表存放节点
+
+(defun defnode (&rest args);;定义一个节点，参数为上一个问题答案，本问题内容，回答yes的答案，回答no的答案
+  (push args *nodes-list*)
+  args)
+
+(defun compile-net (root);;使用静态引用的编译过程，递归地进行处理，直到树的叶子节点，在递归过程层层返回时，每一步都返回了两个目标函数对应的节点，而不仅仅是给出它们的名字。
+  (let ((node (assoc root *nodes-list*)))
+    (if (null node)
+        nil
+        (let ((conts (second node))
+              (yes (third node))
+              (no (fourth node)))
+          (if yes
+              (let ((yes-fn (compile-net yes))
+                    (no-fn (compile-net no)))
+                #'(lambda ()
+                    (format t "~A~%>> " conts)
+                    (funcall (if (eq (read) 'yes)
+                                 yes-fn
+                                 no-fn))))
+              #'(lambda () conts))))))
+
+(defmacro nif (expr pos zero neg);;expr如果大于0执行pos，如果小于0执行neg，如果等于0执行zero
+  `(case (truncate (signum ,expr))
+     (1 ,pos)
+     (0 ,zero)
+     (-1 ,neg)))
+
+(defmacro memq (obj lst);;自定义的member，以eq作为相等判断标准
+  `(member ,obj ,lst :test #'eq))
+
+(defmacro while (test &body body);;实现的while循环
+  `(do ()
+       ((not ,test))
+     ,@body))
+
+(defmacro mac (expr);;用于测试宏展开的宏，只展开一级
+  `(pprint (macroexpand-1 ',expr)))
+
+(defmacro our-expander (name) `(get ,name 'expander));;普通宏的工作模式
+
+(defmacro our-defmacro (name parms &body body);;自己实现defmacro的实现
+  (let ((g (gensym)))
+    `(progn
+       (setf (our-expander ',name)
+             #'(lambda (,g)
+                 (block ,name
+                   (destructuring-bind ,parms (cdr ,g)
+                     ,@body))))
+       ',name)))
+
+(defun our-macroexpand-1 (expr);;自己实现macroexpand-1的实现
+  (if (and (consp expr) (our-expander (car expr)))
+      (funcall (our-expander (car expr)) expr)
+      expr))
+
+(defun make-initforms (bindforms);;由初始化列表生成赋初值的代码
+  (mapcar #'(lambda (b)
+              (if (consp b)
+                  (list (car b) (cadr b))
+                  (list b nil)))
+          bindforms))
+
+(defun make-stepforms (bindforms);;生成更新循环变量的代码
+  (mapcan #'(lambda (b)
+              (if (and (consp b) (third b))
+                  (list (car b) (third b))
+                  nil))
+          bindforms))
+
+(defmacro our-do (bindforms (test &rest result) &body body);;实现do宏的代码
+  (let ((label (gensym)))
+    `(prog ,(make-initforms bindforms)
+        ,label
+        (if ,test
+            (return (progn ,@result)))
+        ,@body
+        (psetq ,@(make-stepforms bindforms))
+        (go ,label))))
+
+(defmacro our-and (&rest args);;自己实现and，效率比较慢
+  (case (length args)
+    (0 t)
+    (1 (car args))
+    (t `(if ,(car args)
+            (our-and ,@(cdr args))))))
+
+(defmacro our-andb (&rest args);;自已实现and，效率比较高
+  (if (null args)
+      t
+      (labels ((expander (rest)
+                 (if (cdr rest)
+                     `(if ,(car rest)
+                          ,(expander (cdr rest)))
+                     (car rest))))
+        (expander args))))
+
+;;(defun move-objs-fn (objs dx dy);;移动各对象并将变化后的局部重画，函数版本
+;;  (multiple-value-bind (x0 y0 x1 y1) (bounds objs)
+;;    (dolist (o objs)
+;;      (incf (obj-x o) dx)
+;;      (incf (obj-y o) dy))
+;;    (multiple-value-bind (xa ya xb yb) (bounds objs)
+;;      (redraw (min x0 xa) (min y0 ya)
+;;              (max x1 xb) (max y1 yb)))))
+
+;;(defun scale-objs-fn (objs factor);;放缩各对象并将变化后的局部重画，函数版本
+;;  (multiple-value-bind (x0 y0 x1 y1) (bounds objs)
+;;    (dolist (o objs)
+;;      (setf (obj-dx o) (* (obj-dx o) factor)
+;;            (obj-dy o) (* (obj-dy o) factor)))
+;;    (multiple-value-bind (xa ya xb yb) (bounds objs)
+;;      (redraw (min x0 xa) (min y0 ya)
+;;              (max x1 xb) (max y1 yb)))))
+
+;;(defmacro with-redraw ((var objs) &body body);;把局部重画的代码抽象成宏
+;;  (let ((gob (gensym))
+;;        (x0 (gensym)) (y0 (gensym))
+;;        (x1 (gensym)) (y1 (gensym)))
+;;    `(let ((,gob ,objs))
+;;       (multiple-value-bind (,x0 ,y0 ,x1 ,y1) (bounds ,gob)
+;;         (dolist (,var ,gob) ,@body)
+;;         (multiple-value-bind (xa ya xb yb) (bounds ,gob)
+;;           (redraw (min ,x0 ,xa) (min ,y0 ,ya)
+;;                   (max ,x1 ,xb) (max ,y1 ,yb)))))))
+
+;;(defun move-objs-mac (objs dx dy);;移动各对象并将变化后的局部重画，宏版本
+;;  (with-redraw (o objs)
+;;    (incf (obj-x o) dx)
+;;    (incf (obj-y o) dy)))
+
+;;(defun scale-objs-mac (objs factor);;放缩各对象并将变化后的局部重画，宏版本
+;;  (with-redraw (o objs)
+;;    (setf (obj-dx o) (* (obj-dx o) factor)
+;;          (obj-dy o) (* (obj-dy o) factor))))
+
+(defmacro before-mac (x y seq);;判断一个列表中x是否在y前面，该宏利用预先求值避免捕捉
+  `(let ((xval ,x) (yval ,y) (seq ,seq))
+     (< (position xval seq)
+        (position yval seq))))
+
+(defmacro for ((var start stop) &body body);;利用闭包避免捕捉
+  `(do ((b #'(lambda (,var) ,@body))
+        (count ,start (1+ count))
+        (limit ,stop))
+       ((> count limit))
+     (funcall b count)))
+
+(defmacro for-gensym ((var start stop) &body body);;通过gensym避免捕捉
+  (let ((gstop (gensym)))
+    `(do ((,var ,start (1+ ,var))
+          (,gstop ,stop))
+         ((> ,var ,gstop))
+       ,@body)))
