@@ -481,6 +481,7 @@
         (position yval seq))))
 
 (defmacro for ((var start stop) &body body);;利用闭包避免捕捉
+
   `(do ((b #'(lambda (,var) ,@body))
         (count ,start (1+ count))
         (limit ,stop))
@@ -493,3 +494,24 @@
           (,gstop ,stop))
          ((> ,var ,gstop))
        ,@body)))
+
+(defmacro for-right ((var start stop) &body body);;一个for的正确版本的宏
+  (let ((gstop (gensym)))
+    `(do ((,var ,start (1+ ,var))
+          (,gstop ,stop))
+         ((> ,var ,gstop))
+       ,@body)))
+
+(defmacro for-error1 ((var start stop) &body body);;多重求值的for宏
+  `(do ((,var ,start (1+ ,var)))
+       ((> ,var ,stop))
+     ,@body))
+
+(defmacro for-error2 ((var start stop) &body body);;错识误的求值顺序的for宏
+  (let ((gstop (gensym)))
+    `(do ((,gstop ,stop)
+          (,var ,start (1+ ,var)))
+         ((> ,var ,gstop))
+       ,@body)))
+
+
