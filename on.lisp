@@ -514,4 +514,54 @@
          ((> ,var ,gstop))
        ,@body)))
 
+(defun ntha (n lst);;返回列表第n个元素，正确版本
+  (if (= n 0)
+      (car lst)
+      (ntha (- n 1) (cdr lst))))
+
+(defmacro nthb (n lst);;返回列表第n个元素，错误宏版本，不能编译，但在SBCL上可以正常编译
+  `(if (= ,n 0)
+       (car ,lst)
+       (nthb (- ,n 1) (cdr ,lst))))
+
+(defmacro nthc (n lst);;返回列表第n个元素，非递归版宏
+  `(do ((n2 ,n (1- n2))
+        (lst2 ,lst (cdr lst2)))
+       ((= n2 0) (car lst2))))
+
+(defmacro nthd (n lst);;解决递归宏展开的两个办法之一，把递归部分变成函数
+  `(nth-fn ,n ,lst))
+
+(defun nth-fn (n lst);;把递归部分变成全局函数
+  (if (= n 0)
+      (car lst)
+      (nth-fn (- n 1) (cdr lst))))
+
+(defmacro nthe (n lst);;把递归部分变成局部函数
+  `(labels ((nth-fn (n lst)
+              (if (= n 0)
+                  (car lst)
+                  (nth-fn (- n 1) (cdr lst)))))
+     (nth-fn ,n ,lst)))
+
+(defun or-expand (args);;递归函数，用来递归生成展开式
+  (if (null args)
+      nil
+      (let ((sym (gensym)))
+        `(let ((,sym ,(car args)))
+           (if ,sym
+               ,sym
+               ,(or-expand (cdr args)))))))
+
+(defmacro ora (&rest args);;自定义or函数，调用递归函数来生成展开式
+  (or-expand args))
+
+(defmacro orb (&rest args);;自定义or函数的另一个版本，在宏的参数个数上做递归
+  (if (null args)
+      nil
+      (let ((sym (gensym)))
+        `(let ((,sym ,(car args)))
+           (if ,sym
+               ,sym
+               (orb ,@(cdr args)))))))
 
