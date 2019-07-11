@@ -554,6 +554,7 @@
                ,(or-expand (cdr args)))))))
 
 (defmacro ora (&rest args);;自定义or函数，调用递归函数来生成展开式
+
   (or-expand args))
 
 (defmacro orb (&rest args);;自定义or函数的另一个版本，在宏的参数个数上做递归
@@ -564,4 +565,59 @@
            (if ,sym
                ,sym
                (orb ,@(cdr args)))))))
+
+(defmacro our-let (binds &body body);;let的宏实现，先把参数名提取出来，再加上body，再把参数值提取出来
+  `((lambda ,(mapcar #'(lambda (x)
+                         (if (consp x)
+                             (car x)
+                             x))
+              binds)
+      ,@body)
+    ,@(mapcar #'(lambda (x)
+                  (if (consp x)
+                      (cadr x)
+                      nil))
+              binds)))
+
+(defmacro when-bind ((var expr) &body body);;三种绑定变量的宏之一，这里先计算expr，根据其值来决定是否执行body
+  `(let ((,var ,expr))
+     (when ,var
+       ,@body)))
+
+(defmacro when-bind* (binds &body body);;三种绑定变量的宏之一，接收一个由成对(sym expr)所组成的列表，如果任何一个expr返回nil，则整个when-bind*表达式就返回nil，且每个sym的值可以传递，和let*一样
+  (if (null binds)
+      `(progn ,@body)
+      `(let (,(car binds))
+         (if ,(caar binds)
+             (when-bind* ,(cdr binds) ,@body)))))
+
+(defmacro with-gensyms (syms &body body);;三种绑定变量的宏之一，把syms中的符号变成由gensym生成的符号
+  `(let ,(mapcar #'(lambda (s)
+                     `(,s (gensym)))
+          syms)
+     ,@body))
+
+(defun condlet-binds (vars cl);;返回各变量对应的值
+  (mapcar #'(lambda (bindform)
+              (if (consp bindform)
+                  (cons (cdr (assoc (car bindform) vars))
+                        (cdr bindform))))
+          (cdr cl)))
+
+(defun condlet-clause (vars cl bodfn);;绑定变量的值，并调用代码主体
+  `(,(car cl) (let ,(mapcar #'cdr vars)
+                (let ,(condlet-binds vars cl)
+                  (,bodfn ,@(mapcar #'cdr vars))))))
+
+(defmacro condlet (clauses &body body);;接受一个绑定语句的列表和一个代码主体，每个绑定语句是否生效都要视其对应的测试表达式而定，第一个测试表达式为真的绑定语句所构造的绑定环境将会胜出，代码主体将在这个绑定环境中被求值
+  (let ((bodfn (gensym))
+        (vars (mapcar #'(lambda (v) (cons v (gensym)))
+                      (remove-duplicates
+                       (mapcar #'car
+                               (mappend #'cdr clauses))))))
+    `(labels ((,bodfn ,(mapcar #'car vars)
+                ,@body))
+       (cond ,@(mapcar #'(lambda (cl)
+                           (condlet-clause vars cl bodfn))
+                       clauses)))))
 
