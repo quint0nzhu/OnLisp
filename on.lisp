@@ -614,10 +614,53 @@
         (vars (mapcar #'(lambda (v) (cons v (gensym)))
                       (remove-duplicates
                        (mapcar #'car
+
                                (mappend #'cdr clauses))))))
     `(labels ((,bodfn ,(mapcar #'car vars)
                 ,@body))
        (cond ,@(mapcar #'(lambda (cl)
                            (condlet-clause vars cl bodfn))
                        clauses)))))
+
+;;(defmacro with-db-mac (db &body body)
+;;  (let ((temp (gensym)))
+;;    `(let ((,temp *db*))
+;;       (unwind-protect
+;;            (progn
+;;              (setq *db* ,db)
+;;              (lock *db*)
+;;              ,@body)
+;;         (progn
+;;           (release *db*)
+;;           (setq *db* ,temp))))))
+
+;;(defun with-db-fn (old-db new-db body)
+;;  (unwind-protect
+;;       (progn
+;;         (setq *db* new-db)
+;;         (lock *db*)
+;;         (funcall body))
+;;    (progn
+;;      (release *db*)
+;;      (setq *db* old-db))))
+
+;;(defmacro with-db-mac-fn (db &body body)
+;;  (let ((gbod (gensym)))
+;;    `(let ((,gbod #'(lambda () ,@body)))
+;;       (declare (dynamic-extent ,gbod))
+;;       (with-db-fn *db* ,db ,gbod))))
+
+(defmacro if3 (test t-case nil-case ?-case)
+  `(case ,test
+     ((nil) ,nil-case)
+     (? ,?-case)
+     (t ,t-case)))
+
+(defmacro nif (expr pos zero neg)
+  (let ((g (gensym)))
+    `(let ((,g ,expr))
+       (cond ((plusp ,g) ,pos)
+             ((zerop ,g) ,zero)
+             (t ,neg)))))
+
 
