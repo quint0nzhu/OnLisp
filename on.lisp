@@ -604,6 +604,7 @@
                         (cdr bindform))))
           (cdr cl)))
 
+
 (defun condlet-clause (vars cl bodfn);;绑定变量的值，并调用代码主体
   `(,(car cl) (let ,(mapcar #'cdr vars)
                 (let ,(condlet-binds vars cl)
@@ -622,7 +623,7 @@
                            (condlet-clause vars cl bodfn))
                        clauses)))))
 
-;;(defmacro with-db-mac (db &body body)
+;;(defmacro with-db-mac (db &body body);;完全用宏实现的with宏
 ;;  (let ((temp (gensym)))
 ;;    `(let ((,temp *db*))
 ;;       (unwind-protect
@@ -634,7 +635,7 @@
 ;;           (release *db*)
 ;;           (setq *db* ,temp))))))
 
-;;(defun with-db-fn (old-db new-db body)
+;;(defun with-db-fn (old-db new-db body);;实现with宏的辅助函数
 ;;  (unwind-protect
 ;;       (progn
 ;;         (setq *db* new-db)
@@ -644,23 +645,108 @@
 ;;      (release *db*)
 ;;      (setq *db* old-db))))
 
-;;(defmacro with-db-mac-fn (db &body body)
+;;(defmacro with-db-mac-fn (db &body body);;用函数和宏结合起来实现的with宏
 ;;  (let ((gbod (gensym)))
 ;;    `(let ((,gbod #'(lambda () ,@body)))
 ;;       (declare (dynamic-extent ,gbod))
 ;;       (with-db-fn *db* ,db ,gbod))))
 
-(defmacro if3 (test t-case nil-case ?-case)
+(defmacro if3 (test t-case nil-case ?-case);;三值逻辑的条件选择宏
   `(case ,test
      ((nil) ,nil-case)
      (? ,?-case)
      (t ,t-case)))
 
-(defmacro nif (expr pos zero neg)
+(defmacro nif (expr pos zero neg);;接受数值表达式作为第一个参数，并根据这个表达式的符号来求值接下来三个参数中的一个
   (let ((g (gensym)))
     `(let ((,g ,expr))
        (cond ((plusp ,g) ,pos)
              ((zerop ,g) ,zero)
              (t ,neg)))))
 
+(defmacro in (obj &rest choices);;使用高效地测试集合的成员关系，测试一个对象是否属于某些备选对象的集合
+  (let ((insym (gensym)))
+    `(let ((,insym ,obj))
+       (or ,@(mapcar #'(lambda (c) `(eql ,insym ,c))
+                     choices)))))
+
+(defmacro inq (obj &rest args);;上面in宏的引用版变形
+  `(in ,obj ,@(mapcar #'(lambda (a)
+                          `',a)
+                      args)))
+
+(defmacro in-if (fn &rest choices);;in宏的自定义测试函数版，此处使用一元测试函数
+  (let ((fnsym (gensym)))
+    `(let ((,fnsym ,fn))
+       (or ,@(mapcar #'(lambda (c)
+                         `(funcall ,fnsym ,c))
+                     choices)))))
+
+(defun >casex (g cl);;生成case每个子句展开式的函数
+  (let ((key (car cl))
+        (rest (cdr cl)))
+    (cond ((consp key) `((in ,g ,@key) ,@rest))
+          ((inq key t otherwise) `(t ,@rest))
+          (t (error "bad >case clause")))))
+
+(defmacro >case (expr &rest clauses);;和case类似，但会对每个子句里的键进行求值
+  (let ((g (gensym)))
+    `(let ((,g ,expr))
+       (cond ,@(mapcar #'(lambda (cl) (>casex g cl))
+                       clauses)))))
+
+(defmacro while (test &body body);;简单的迭代宏，如果test为真就执行body
+  `(do ()
+       ((not ,test))
+     ,@body))
+
+(defmacro till (test &body body);;简单的迭代宏，如果test为真就停止执行body
+  `(do ()
+       (,test)
+     ,@body))
+
+(defmacro for11-7 ((var start stop) &body body);;简单的迭代宏，在start和stop之间迭代
+  (let ((gstop (gensym)))
+    `(do ((,var ,start (1+ ,var))
+          (,gstop ,stop))
+         ((> ,var ,gstop))
+       ,@body)))
+
+(defmacro do-tuples/o (parms source &body body);;求值主体时绑定一组变量到一个列表中相继的子序列上，不折回到表头
+  (if parms
+      (let ((src (gensym)))
+        `(prog ((,src ,source))
+            (mapc #'(lambda ,parms ,@body)
+                  ,@(map0-n #'(lambda (n)
+                                `(nthcdr ,n ,src))
+                            (- (length source)
+                               (length parms))))))))
+
+(defun dt-args (len rest src)
+  (map0-n #'(lambda (m)
+              (map1-n #'(lambda (n)
+                          (let ((x (+ m n)))
+                            (if (>= x len)
+                                `(nth ,(- x len) ,src)
+                                `(nth ,(1- x) ,rest))))
+                      len))
+          (- len 2)))
+
+(defmacro do-tuples/c (parms source &body body);;求值主体时绑定一组变量到一个列表中相继的子序列上，然后折回到表头
+  (if parms
+      (with-gensyms (src rest bodfn)
+        (let ((len (length parms)))
+          `(let ((,src ,source))
+             (when (nthcdr ,(1- len) ,src)
+               (labels ((,bodfn ,parms ,@body))
+                 (do ((,rest ,src (cdr ,rest)))
+                     ((not (nthcdr ,(1- len) ,rest))
+                      ,@(mapcar #'(lambda (args)
+                                    `(,bodfn ,@args))
+                                (dt-args len rest src))
+                      nil)
+                   (,bodfn ,@(map1-n #'(lambda (n)
+                                         `(nth ,(1- n)
+                                               ,rest))
+                                     len))))))))))
 
