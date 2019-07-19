@@ -750,3 +750,106 @@
                                                ,rest))
                                      len))))))))))
 
+(defun mvdo-rebind-gen (rebinds);;实现具体的初值和迭代变的绑定的函数
+  (cond ((null rebinds) nil)
+        ((< (length (car rebinds)) 3)
+         (mvdo-rebind-gen (cdr rebinds)))
+        (t
+         (cons (list (if (atom (caar rebinds))
+                         'setq
+                         'multiple-value-setq)
+                     (caar rebinds)
+                     (third (car rebinds)))
+               (mvdo-rebind-gen (cdr rebinds))))))
+
+(defun mvdo-gen (binds rebinds test body);;mvdo*宏的函数实现部分
+  (if (null binds)
+      (let ((label (gensym)))
+        `(prog nil
+            ,label
+            (if ,(car test)
+                (return (progn ,@(cdr test))))
+            ,@body
+            ,@(mvdo-rebind-gen rebinds)
+            (go ,label)))
+      (let ((rec (mvdo-gen (cdr binds) rebinds test body)))
+        (let ((var/s (caar binds)) (expr (cadar binds)))
+          (if (atom var/s)
+              `(let ((,var/s ,expr)) ,rec)
+              `(multiple-value-bind ,var/s ,expr ,rec))))))
+
+(defmacro mvdo* (parm-cl test-cl &body body);;支持多值的do*版本宏
+  (mvdo-gen parm-cl parm-cl test-cl body))
+
+;;(mvdo* (((px py) (pos player) (move player mx my));;一个利用mvdo*实现的碰撞游戏
+;;        ((x1 y1) (pos obj1) (move obj1 (- px x1)
+;;                                  (- py y1)))
+;;        ((x2 y2) (pos obj2) (move obj2 (- px x2)
+;;                                  (- py y2)))
+;;        ((mx my) (mouse-vector) (mouse-vector))
+;;        (win nil (touch obj1 obj2))
+;;        (lose nil (and (touch obj1 player)
+;;                       (touch obj2 player))))
+;;       ((or win lose) (if win 'win 'lose))
+;;       (clear)
+;;       (draw obj1)
+;;       (draw obj2)
+;;       (draw player))
+
+(defun shuffle (x y);;按顺序合并两个列表，多余元素补在新生成列表后面
+  (cond ((null x) y)
+        ((null y) x)
+        (t (list* (car x) (car y)
+                  (shuffle (cdr x) (cdr y))))))
+
+(defmacro mvpsetq (&rest args);;多值并行设置变量
+  (let* ((pairs (group args 2))
+         (syms (mapcar #'(lambda (p)
+                           (mapcar #'(lambda (x) (gensym))
+                                   (mklist (car p))))
+                       pairs)))
+    (labels ((rec (ps ss)
+               (if (null ps)
+                   `(setq
+                     ,@(mapcan #'(lambda (p s)
+                                   (shuffle (mklist (car p))
+                                            s))
+                               pairs syms))
+                   (let ((body (rec (cdr ps) (cdr ss))))
+                     (let ((var/s (caar ps))
+                           (expr (cadar ps)))
+                       (if (consp var/s)
+                           `(multiple-value-bind ,(car ss)
+                                ,expr
+                              ,body)
+                           `(let ((,@(car ss) ,expr))
+                              ,body)))))))
+      (rec pairs syms))))
+
+(defmacro mvdo (binds (test &rest result) &body body);;do的多值绑定版本，注意和do*的多值绑定版本的区别
+  (let ((label (gensym))
+        (temps (mapcar #'(lambda (b)
+                           (if (listp (car b))
+                               (mapcar #'(lambda (x)
+                                           (gensym))
+                                       (car b))
+                               (gensym)))
+                       binds)))
+    `(let ,(mappend #'mklist temps)
+       (mvpsetq ,@(mapcan #'(lambda (b var)
+                             (list var (cadr b)))
+                         binds
+                         temps))
+       (prog ,(mapcar #'(lambda (b var) (list b var))
+               (mappend #'mklist (mapcar #'car binds))
+               (mappend #'mklist temps))
+          ,label
+          (if ,test
+              (return (progn ,@result)))
+          ,@body
+          (mvpsetq ,@(mapcan #'(lambda (b)
+                                 (if (third b)
+                                     (list (car b)
+                                           (third b))))
+                             binds))
+          (go ,label)))))
