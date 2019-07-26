@@ -853,3 +853,35 @@
                                            (third b))))
                              binds))
           (go ,label)))))
+
+(define-modify-macro toggle2 () not);;利用CL提供的宏自动定义基于setf的宏
+
+(defmacro toggle (&rest args);;可以将参数列表中每个元素都toggle
+  `(progn
+     ,@(mapcar #'(lambda (a) `(toggle2 ,a))
+               args)))
+
+(defmacro allf (val &rest args);;将同一值赋给多个广义变量
+  (with-gensyms (gval)
+    `(let ((,gval ,val))
+       (setf ,@(mapcan #'(lambda (a) (list a gval))
+                       args)))))
+
+(defmacro nilf (&rest args) `(allf nil ,@args));;将参数设置为nil
+
+(defmacro tf (&rest args) `(allf t ,@args));;将参数设置为t
+
+(define-modify-macro concf (obj) nconc);;破坏性修改列表结尾的宏
+
+(defun conc1f/function (place obj);;在列表结尾追加一个元素的函数
+  (nconc place (list obj)))
+
+(define-modify-macro conc1f (obj) conc1f/function);;将追加元素的函数封装成一个宏
+
+(defun concnew/function (place obj &rest args);;只有在列表中没有该元素时才会追加到结尾
+  (unless (apply #'member obj place args)
+    (nconc place (list obj))))
+
+(define-modify-macro concnew (obj &rest args);;将上面那个函数封装成宏
+  concnew/function)
+
