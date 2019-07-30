@@ -885,3 +885,75 @@
 (define-modify-macro concnew (obj &rest args);;将上面那个函数封装成宏
   concnew/function)
 
+(defmacro _f (op place &rest args);;破坏性把函数应用于一个广义变量
+  (multiple-value-bind (vars forms var set access)
+      (get-setf-expansion place)
+    `(let* (,@(mapcar #'list vars forms)
+            (,(car var) (,op ,access ,@args)))
+       ,set)))
+
+(defmacro pull (obj place &rest args);;将列表中某个位置的元素移除
+  (multiple-value-bind (vars forms var set access)
+      (get-setf-expansion place)
+    (let ((g (gensym)))
+      `(let* ((,g ,obj)
+              ,@(mapcar #'list vars forms)
+              (,(car var) (delete ,g ,access ,@args)))
+         ,set))))
+
+(defmacro pull-if (test place &rest args);;按照给定判定条件，将列表中某个位置的元素移除
+  (multiple-value-bind (vars forms var set access)
+      (get-setf-expansion place)
+    (let ((g (gensym)))
+      `(let* ((,g ,test)
+              ,@(mapcar #'list vars forms)
+              (,(car var) (delete-if ,g ,access ,@args)))
+         ,set))))
+
+(defmacro popn (n place);;弹出列表中前n个元素
+  (multiple-value-bind (vars forms var set access)
+      (get-setf-expansion place)
+    (with-gensyms (gn glst)
+      `(let* ((,gn ,n)
+              ,@(mapcar #'list vars forms)
+              (,glst ,access)
+              (,(car var) (nthcdr ,gn ,glst)))
+         (prog1 (subseq ,glst 0 ,gn)
+           ,set)))))
+
+(defmacro sortf (op &rest places);;将参数进行排序
+  (let* ((meths (mapcar #'(lambda (p)
+                            (multiple-value-list
+                             (get-setf-expansion p)))
+                        places))
+         (temps (apply #'append (mapcar #'third meths))))
+    `(let* ,(mapcar #'list
+                    (mapcan #'(lambda (m)
+                                (append (first m)
+                                        (third m)))
+                            meths)
+                    (mapcan #'(lambda (m)
+                                (append (second m)
+                                        (list (fifth m))))
+                            meths))
+       ,@(mapcon #'(lambda (rest)
+                     (mapcar
+                      #'(lambda (arg)
+                          `(unless (,op ,(car rest) ,arg)
+                             (rotatef ,(car rest) ,arg)))
+                      (cdr rest)))
+                 temps)
+       ,@(mapcar #'fourth meths))))
+
+(defvar *world* '((a . 2) (b . 16) (c . 50) (d . 20) (f . 12)));;实际数据库
+
+(defvar *cache* (make-hash-table));;数据库缓存
+
+(defun retrieve (key);;查询函数
+  (multiple-value-bind (x y) (gethash key *cache*)
+    (if y
+        (values x y)
+        (cdr (assoc key *world*)))))
+
+(defsetf retrieve (key) (val);;对上面的查询函数求逆
+  `(setf (gethash ,key *cache*) ,val))
