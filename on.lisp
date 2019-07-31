@@ -955,5 +955,99 @@
         (values x y)
         (cdr (assoc key *world*)))))
 
+
 (defsetf retrieve (key) (val);;对上面的查询函数求逆
   `(setf (gethash ,key *cache*) ,val))
+
+(defun avg (&rest args);;函数求平均值
+  (/ (apply #'+ args) (length args)))
+
+(defmacro avg-mac (&rest args);;用宏在编译期计算平均值，对length的调用会在编译期完成
+  `(/ (+ ,@args) ,(length args)))
+
+(defun most-of (&rest args);;参数中一半以上是真，就返回真，否则返回nil
+  (let ((all 0)
+        (hits 0))
+    (dolist (a args)
+      (incf all)
+      (if a (incf hits)))
+    (> hits (/ all 2))))
+
+(defmacro most-of-mac (&rest args);;在编译期间计算比较，参数中一半以上是真就返回真，理想情况下，只需对刚过半的参数求值
+  (let ((need (floor (/ (length args) 2)))
+        (hits (gensym)))
+    `(let ((,hits 0))
+       (or ,@(mapcar #'(lambda (a)
+                         `(and ,a (> (incf ,hits) ,need)))
+                     args)))))
+
+(defun nthmost (n lst);;返回数列中第n大的值，要先复制，再排序
+  (nth n (sort (copy-list lst) #'>)))
+
+(defun nthmost-gen (var vars &optional long?);;生成比较每一个数值的代码
+  (if (null vars)
+      nil
+      (let ((else (nthmost-gen var (cdr vars) long?)))
+        (if (and (not long?) (null else))
+            `(setq ,(car vars) ,var)
+            `(if (> ,var ,(car vars))
+                 (setq ,@(mapcan #'list
+                                 (reverse vars)
+                                 (cdr (reverse vars)))
+                       ,(car vars) ,var)
+                 ,else)))))
+
+(defun gen-start (glst syms);;开始生成比较代码
+  (reverse
+   (maplist #'(lambda (syms)
+                (let ((var (gensym)))
+                  `(let ((,var (pop ,glst)))
+                     ,(nthmost-gen var (reverse syms)))))
+            (reverse syms))))
+
+(defmacro nthmost-mac (n lst);;定义一个宏版本的nthmost，n是个比较小的数话，可以每次找前n个最大的数，然后返回之中最小的，就是结果
+  (if (and (integerp n) (< n 20))
+      (with-gensyms (glst gi)
+        (let ((syms (map0-n #'(lambda (x) (gensym)) n)))
+          `(let ((,glst ,lst))
+             (unless (< (length ,glst) ,(1+ n))
+               ,@(gen-start glst syms)
+               (dolist (,gi ,glst)
+                 ,(nthmost-gen gi syms t))
+               ,(car (last syms))))))
+      `(nth ,n (sort (copy-list ,lst) #'>))))
+
+(defconstant *segs* 20)
+(defconstant *du* (/ 1.0 *segs*))
+(defconstant *pts* (make-array (list (1+ *segs*) 2)))
+
+(defmacro genbez (x0 y0 x1 y1 x2 y2 x3 y3);;生成贝塞尔曲线的宏
+  (with-gensyms (gx0 gx1 gy0 gy1 gx3 gy3)
+    `(let ((,gx0 ,x0) (,gy0 ,y0)
+           (,gx1 ,x1) (,gy1 ,y1)
+           (,gx3 ,x3) (,gy3 ,y3))
+       (let ((cx (* (- ,gx1 ,gx0) 3))
+             (cy (* (- ,gy1 ,gy0) 3))
+             (px (* (- ,x2 ,gx1) 3))
+             (py (* (- ,y2 ,gy1) 3)))
+         (let ((bx (- px cx))
+               (by (- py cy))
+               (ax (- ,gx3 px ,gx0))
+               (ay (- ,gy3 py ,gy0)))
+           ,@(map1-n #'(lambda (n)
+                         (let* ((u (* n *du*))
+                                (u2 (* u u))
+                                (u3 (expt u 3)))
+                           `(setf (aref *pts* ,n 0)
+                                  (+ (* ax ,u3)
+                                     (* bx ,u2)
+                                     (* cx ,u)
+                                     ,gx0)
+                                  (aref *pts* ,n 1)
+                                  (+ (* ay ,u3)
+                                     (* by ,u2)
+                                     (* cy ,u)
+                                     ,gy0))))
+                     (1- *segs*))
+           (setf (aref *pts* *segs* 0) ,gx3
+                 (aref *pts* *segs* 1) ,gy3))))))
