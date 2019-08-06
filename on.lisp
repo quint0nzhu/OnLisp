@@ -1051,3 +1051,110 @@
                      (1- *segs*))
            (setf (aref *pts* *segs* 0) ,gx3
                  (aref *pts* *segs* 1) ,gy3))))))
+
+(defmacro aif (test-form then-form &optional else-form);;指代变形if宏
+  `(let ((it ,test-form))
+     (if it ,then-form ,else-form)))
+
+(defmacro awhen (test-form &body body);;指代变形when宏
+  `(aif ,test-form
+        (progn ,@body)))
+
+(defmacro awhile (expr &body body);;指代变形while宏
+  `(do ((it ,expr ,expr))
+       ((not it))
+     ,@body))
+
+(defmacro aand (&rest args);;指代变形and宏
+  (cond ((null args) t)
+        ((null (cdr args)) (car args))
+        (t `(aif ,(car args) (aand ,@(cdr args))))))
+
+(defmacro acond (&rest clauses);;指代变形cond宏
+  (if (null clauses)
+      nil
+      (let ((cl1 (car clauses))
+            (sym (gensym)))
+        `(let ((,sym ,(car cl1)))
+           (if ,sym
+               (let ((it ,sym)) ,@(cdr cl1))
+               (acond ,@(cdr clauses)))))))
+
+(defmacro alambda (parms &body body);;指代变形lambda宏
+  `(labels ((self ,parms ,@body))
+     #'self))
+
+(defmacro ablock (tag &rest args);;指代变形block宏
+  `(block ,tag
+     ,(funcall (alambda (args)
+                        (case (length args)
+                          (0 nil)
+                          (1 (car args))
+                          (t `(let ((it ,(car args)))
+                                ,(self (cdr args))))))
+               args)))
+
+(defmacro aif2 (test &optional then else);;绑定第一个值，并测试第二个值，if的多值指代宏
+  (let ((win (gensym)))
+    `(multiple-value-bind (it ,win) ,test
+       (if (or it ,win) ,then ,else))))
+
+(defmacro awhen2 (test &body body);;when的多值指代宏
+  `(aif2 ,test (progn ,@body)))
+
+(defmacro awhile2 (test &body body);;while的多值指代宏
+  (let ((flag (gensym)))
+    `(let ((,flag t))
+       (while ,flag
+              (aif2 ,test
+                    (progn ,@body)
+                    (setq ,flag nil))))))
+
+(defmacro acond2 (&rest clauses);;cond的多值指代宏
+  (if (null clauses)
+      nil
+      (let ((cl1 (car clauses))
+            (val (gensym))
+            (win (gensym)))
+        `(multiple-value-bind (,val ,win) ,(car cl1)
+           (if (or ,val ,win)
+               (let ((it ,val)) ,@(cdr cl1))
+               (aconds ,@(cdr clauses)))))))
+
+(let ((g (gensym)));;另一个版本的read宏，用第二返回值指示失败
+  (defun read2 (&optional (str *standard-input*))
+    (let ((val (read str nil g)))
+      (unless (equal val g) (values val t)))))
+
+(defmacro do-file (filename &body body);;遍历一个文件里的所有表达式
+  (let ((str (gensym)))
+    `(with-open-file (,str ,filename)
+       (awhile2 (read2 ,str)
+         ,@body))))
+
+(defun rbuild (expr);;根据参数列表决定如何生成函数调用关系
+  (if (or (atom expr) (eq (car expr) 'lambda))
+      expr
+      (if (eq (car expr) 'compose)
+          (build-compose (cdr expr))
+          (build-call (car expr) (cdr expr)))))
+
+(defun build-call (op fns);;不包含compose的函数调用
+  (let ((g (gensym)))
+    `(lambda (,g)
+       (,op ,@(mapcar #'(lambda (f)
+                          `(,(rbuild f) ,g))
+                      fns)))))
+
+(defun build-compose (fns);;包含compose的函数调用
+  (let ((g (gensym)))
+    `(lambda (,g)
+       ,(labels ((rec (fns)
+                   (if fns
+                       `(,(rbuild (car fns))
+                         ,(rec (cdr fns)))
+                       g)))
+          (rec fns)))))
+
+(defmacro fn (expr) `#',(rbuild expr));;通用的用于构造函数的宏
+
