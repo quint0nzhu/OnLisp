@@ -1149,6 +1149,7 @@
 (defun build-compose (fns);;包含compose的函数调用
   (let ((g (gensym)))
     `(lambda (,g)
+
        ,(labels ((rec (fns)
                    (if fns
                        `(,(rbuild (car fns))
@@ -1157,4 +1158,88 @@
           (rec fns)))))
 
 (defmacro fn (expr) `#',(rbuild expr));;通用的用于构造函数的宏
+
+(defmacro alrec (rec &optional base);;用it指代当前列表的car，用rec指代递归调用，递归调用列表中的每一个元素
+  (let ((gfn (gensym)))
+    `(lrec #'(lambda (it ,gfn)
+               (symbol-macrolet ((rec (funcall ,gfn)))
+                 ,rec))
+           ,base)))
+
+(defmacro on-cdrs (rec base &rest lsts);;把上面的宏改写成on-cdrs形式，使得可以方便定义有名函数
+  `(funcall (alrec ,rec #'(lambda () ,base)) ,@lsts))
+
+(defun our-copy-list (lst);;利用on-cdrs定义的copy-list函数
+  (on-cdrs (cons it rec) nil lst))
+
+(defun our-remove-duplicates (lst);;利用on-cdrs定义的remove-duplicates函数
+  (on-cdrs (adjoin it rec) nil lst))
+
+(defun our-find-if (fn lst);;利用on-cdrs定义的find-if函数
+  (on-cdrs (if (funcall fn it) it rec) nil lst))
+
+(defun our-some (fn lst);;利用on-cdrs定义的some函数
+  (on-cdrs (or (funcall fn it) rec) nil lst))
+
+(defun unions (&rest sets);;利用on-cdrs定义的union函数
+  (on-cdrs (union it rec) (car sets) (cdr sets)))
+
+(defun intersections (&rest sets);;利用on-cdrs定义的intersection函数
+  (unless (some #'null sets)
+    (on-cdrs (intersection it rec) (car sets) (cdr sets))))
+
+(defun differences (set &rest outs);;利用on-cdrs定义的set-difference函数
+  (on-cdrs (set-difference rec it) set outs))
+
+(defun maxmin (args);;利用on-cdrs定义的maxmin函数，返回列表中的最大值和最小值
+  (when args
+    (on-cdrs (multiple-value-bind (mx mn) rec
+               (values (max mx it) (min mn it)))
+             (values (car args) (car args))
+             (cdr args))))
+
+(defmacro atrec (rec &optional (base 'it));;在树形结构上遍历，利用指代
+  (let ((lfn (gensym))
+        (rfn (gensym)))
+    `(trec #'(lambda (it ,lfn ,rfn)
+               (symbol-macrolet ((left (funcall ,lfn))
+                                 (right (funcall ,rfn)))
+                 ,rec))
+           #'(lambda (it) ,base))))
+
+(defmacro on-trees (rec base &rest trees);;将上面的宏包装成on-trees形式
+  `(funcall (atrec ,rec ,base) ,@trees))
+
+(defun our-copy-tree (tree);;利用on-trees定义our-copy-tree函数
+  (on-trees (cons left right) it tree))
+
+(defun our-count-leaves (tree);;利用on-trees定义our-count-leaves函数
+  (on-trees (+ left (or right 1)) 1 tree))
+
+(defun our-flatten (tree);;利用on-trees定义our-flatten函数
+  (on-trees (nconc left right) (mklist it) tree))
+
+(defun our-rfind-if (fn tree);;利用on-trees定义our-rfind-if
+  (on-trees (or left right)
+            (and (funcall fn it) it)
+            tree))
+
+(defconstant unforced (gensym))
+
+(defstruct delay forced closure)
+
+(defmacro delay (expr)
+  (let ((self (gensym)))
+    `(let ((,self (make-delay :forced unforced)))
+       (setf (delay-closure ,self)
+             #'(lambda()
+                 (setf (delay-forced ,self) ,expr)))
+       ,self)))
+
+(defun force (x)
+  (if (delay-p x)
+      (if (eq (delay-forced x) unforced)
+          (funcall (delay-closure x))
+          (delay-forced x))
+      x))
 
