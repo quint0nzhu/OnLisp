@@ -1224,11 +1224,11 @@
             (and (funcall fn it) it)
             tree))
 
-(defconstant unforced (gensym))
+(defconstant unforced (gensym));;定义一个常量符号
 
-(defstruct delay forced closure)
+(defstruct delay forced closure);;定义闭包
 
-(defmacro delay (expr)
+(defmacro delay (expr);;delay的实现，延时求值
   (let ((self (gensym)))
     `(let ((,self (make-delay :forced unforced)))
        (setf (delay-closure ,self)
@@ -1236,7 +1236,7 @@
                  (setf (delay-forced ,self) ,expr)))
        ,self)))
 
-(defun force (x)
+(defun force (x);;force的实现，不会延时求值
   (if (delay-p x)
       (if (eq (delay-forced x) unforced)
           (funcall (delay-closure x))
