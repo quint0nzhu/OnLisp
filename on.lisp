@@ -1243,3 +1243,21 @@
           (delay-forced x))
       x))
 
+(defmacro abbrev (short long);;自动定义缩略语
+  `(defmacro ,short (&rest args)
+     `(,',long ,@args)))
+
+(defmacro abbrevs (&rest names);;一次性定义多个缩略语
+  `(progn
+     ,@(mapcar #'(lambda (pair)
+                   `(abbrev ,@pair))
+               (group names 2))))
+
+(defmacro propmacro (propname);;自动定义访问宏
+  `(defmacro ,propname (obj)
+     `(get ,obj ',',propname)))
+
+(defmacro propmacros (&rest props);;一次性定义多个访问宏
+  `(progn
+     ,@(mapcar #'(lambda (p) `(propmacro ,p)
+                   props))))
