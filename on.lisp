@@ -1262,7 +1262,7 @@
      ,@(mapcar #'(lambda (p) `(propmacro ,p)
                    props))))
 
-(defun a+expand (args syms)
+(defun a+expand (args syms);;生成其展开式，并聚集出一个这些生成符号的列表
   (if args
       (let ((sym (gensym)))
         `(let* ((,sym ,(car args))
@@ -1271,10 +1271,10 @@
                       (append syms (list sym)))))
       `(+ ,@syms)))
 
-(defmacro a+ (&rest args)
+(defmacro a+ (&rest args);;使it总是绑定到上个参数返回的值上
   (a+expand args nil))
 
-(defun alist-expand (args syms)
+(defun alist-expand (args syms);;与a+expand几乎一样
   (if args
       (let ((sym (gensym)))
         `(let* ((,sym ,(car args))
@@ -1283,13 +1283,13 @@
                           (append syms (list sym)))))
       `(list ,@syms)))
 
-(defmacro alist (&rest args)
+(defmacro alist (&rest args);;与a+几乎一样
   (alist-expand args nil))
 
-(defun pop-symbol (sym)
+(defun pop-symbol (sym);;弹出第一个符号
   (intern (subseq (symbol-name sym) 1)))
 
-(defun anaphex (args expr)
+(defun anaphex (args expr);;递归展开器
   (if args
       (let ((sym (gensym)))
         `(let* ((,sym ,(car args))
@@ -1298,12 +1298,12 @@
                      (append expr (list sym)))))
       expr))
 
-(defmacro defanaph (name &optional calls)
+(defmacro defanaph (name &optional calls);;自动产生a+和alist宏
   (let ((calls (or calls (pop-symbol name))))
     `(defmacro ,name (&rest args)
        (anaphex args (list ',calls)))))
 
-(defun anaphex1 (args call)
+(defun anaphex1 (args call);;宏调用中所有参数都将被求值，it总是被绑定在前一个参数的值上
   (if args
       (let ((sym (gensym)))
         `(let* ((,sym ,(car args))
@@ -1312,14 +1312,14 @@
                       (append call (list sym)))))
       call))
 
-(defun anaphex2 (op args)
+(defun anaphex2 (op args);;只有第一个参数是必须求值的，并且it将被绑定在这个值上
   `(let ((it ,(car args)))
      (,op it ,@(cdr args))))
 
-(defun anaphex3 (op args)
+(defun anaphex3 (op args);;第一个参数被按照广义变量来对待，而it将被绑定在它的初始值上
   `(_f (lambda (it) (,op it ,@(cdr args))) ,(car args)))
 
-(defmacro defanaph1 (name &key calls (rule :all))
+(defmacro defanaph1 (name &key calls (rule :all));;将上面三个展开器拼接在一起
   (let* ((opname (or calls (pop-symbol name)))
          (body (case rule
                  (:all `(anaphex1 args '(,opname)))
@@ -1327,3 +1327,78 @@
                  (:place `(anaphex3 ',opname args)))))
     `(defmacro ,name (&rest args)
        ,body)))
+
+;;(set-macro-character #\';;'的可能定义
+;;                     #'(lambda (stream char)
+;;                         (declare (ignore char))
+;;                         (list 'quote (read stream t nil t))))
+
+(set-dispatch-macro-character #\# #\?;;一个用于常委函数的读取宏
+                              #'(lambda (stream char1 char2)
+                                  (declare (ignore char1 char2))
+                                  `#'(lambda (&rest ,(gensym))
+                                       ,(read stream t nil t))))
+
+(set-macro-character #\] (get-macro-character #\)));;把]识别成定界符
+
+(set-dispatch-macro-character #\# #\[;;一个定义定界符的读取宏
+                              #'(lambda (stream char1 char2)
+                                  (declare (ignore char1 char2))
+                                  (let ((accum nil)
+                                        (pair (read-delimited-list #\] stream t)))
+                                    (do ((i (ceiling (car pair)) (1+ i)))
+                                        ((> i (floor (cadr pair)))
+                                         (list 'quote (nreverse accum)))
+                                      (push i accum)))))
+
+(let ((rpar (get-macro-character #\))));;辅助函数，将函数应用到它读到的东西
+  (defun ddfn (left right fn)
+    (set-macro-character right rpar)
+    (set-dispatch-macro-character #\# left
+                                  #'(lambda (stream char1 char2)
+                                      (declare (ignore char1 char2))
+                                      (apply fn
+                                             (read-delimited-list right stream t))))))
+
+(defmacro defdelim (left right parms &body body);;一个用于定义定界符读取宏的宏
+  `(ddfn ,left ,right #'(lambda ,parms ,@body)))
+
+(defdelim #\{ #\} (&rest args) `(fn (compose ,@args)));;一个用于函数型复合的读取宏
+
+(defun destruc (pat seq &optional (atom? #'atom) (n 0));;遍历匹配模式，将每个变量和运行期对应对象的位置关联在一起
+  (if (null pat)
+      nil
+      (let ((rest (cond ((funcall atom? pat) pat)
+                        ((eq (car pat) '&rest) (cadr pat))
+                        ((eq (car pat) '&body) (cadr pat))
+                        (t nil))))
+        (if rest
+            `((,rest (subseq ,seq ,n)))
+            (let ((p (car pat))
+                  (rec (destruc (cdr pat) seq atom? (1+ n))))
+              (if (funcall atom? p)
+                  (cons `(,p (elt ,seq ,n))
+                        rec)
+                  (let ((var (gensym)))
+                    (cons (cons `(,var (elt ,seq ,n))
+                                (destruc p var atom?))
+                          rec))))))))
+
+(defun dbind-ex (binds body);;生成宏展开代码
+  (if (null binds)
+      `(progn ,@body)
+      `(let ,(mapcar #'(lambda (b)
+                         (if (consp (car b))
+                             (car b)
+                             b))
+              binds)
+         ,(dbind-ex (mapcan #'(lambda (b)
+                                (if (consp (car b))
+                                    (cdr b)))
+                            binds)
+                    body))))
+
+(defmacro dbind (pat seq &body body);;通用序列解构操作符
+  (let ((gseq (gensym)))
+    `(let ((,gseq ,seq))
+       ,(dbind-ex (destruc pat gseq #'atom) body))))
