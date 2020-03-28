@@ -481,7 +481,6 @@
         (position yval seq))))
 
 (defmacro for ((var start stop) &body body);;利用闭包避免捕捉
-
   `(do ((b #'(lambda (,var) ,@body))
         (count ,start (1+ count))
         (limit ,stop))
@@ -955,7 +954,6 @@
         (values x y)
         (cdr (assoc key *world*)))))
 
-
 (defsetf retrieve (key) (val);;对上面的查询函数求逆
   `(setf (gethash ,key *cache*) ,val))
 
@@ -1119,7 +1117,7 @@
         `(multiple-value-bind (,val ,win) ,(car cl1)
            (if (or ,val ,win)
                (let ((it ,val)) ,@(cdr cl1))
-               (aconds ,@(cdr clauses)))))))
+               (acond2 ,@(cdr clauses)))))))
 
 (let ((g (gensym)));;另一个版本的read宏，用第二返回值指示失败
   (defun read2 (&optional (str *standard-input*))
@@ -1402,3 +1400,145 @@
   (let ((gseq (gensym)))
     `(let ((,gseq ,seq))
        ,(dbind-ex (destruc pat gseq #'atom) body))))
+
+(defmacro with-matrix (pats ar &body body)
+  (let ((gar (gensym)))
+    `(let ((,gar ,ar))
+       (let ,(let ((row -1))
+               (mapcan
+                #'(lambda (pat)
+                    (incf row)
+                    (setq col -1)
+                    (mapcar #'(lambda (p)
+                                `(,p (aref ,gar
+                                           ,row
+                                           ,(incf col))))
+                            pat))
+                pats))
+         ,@body))))
+
+(defmacro with-array (pat ar &body body)
+  (let ((gar (gensym)))
+    `(let ((,gar ,ar))
+       (let ,(mapcar #'(lambda (p)
+                         `(,(car p) (aref ,gar ,@(cdr p))))
+              pat)
+         ,@body))))
+
+(defmacro with-struct ((name . fields) struct &body body)
+  (let ((gs (gensym)))
+    `(let ((,gs ,struct))
+       (let ,(mapcar #'(lambda (f)
+                         `(,f (,(symb name f), gs)))
+              fields)
+         ,@body))))
+
+(defun wplac-ex (binds body)
+  (if (null binds)
+      `(progn ,@body)
+      `(symbol-macrolet ,(mapcar #'(lambda (b)
+                                     (if (consp (car b))
+                                         (car b)
+                                         b))
+                          binds)
+         ,(wplac-ex (mapcan #'(lambda (b)
+                                (if (consp (car b))
+                                    (cdr b)))
+                            binds)
+                    body))))
+
+(defmacro with-places (pat seq &body body)
+  (let ((gseq (gensym)))
+    `(let ((,gseq ,seq))
+       ,(wplac-ex (destruc pat gseq #'atom) body))))
+
+(defun binding (x binds)
+  (labels ((recbind (x binds)
+             (aif (assoc x binds)
+                  (or (recbind (cdr it) binds)
+                      it))))
+    (let ((b (recbind x binds)))
+      (values (cdr b) b))))
+
+(defun varsym? (x)
+  (and (symbolp x) (eq (char (symbol-name x) 0) #\?)))
+
+(defun match (x y &optional binds)
+  (acond2
+   ((or (eql x y) (eql x '_) (eql y '_)) (values binds t))
+   ((binding x binds) (match it y binds))
+   ((binding y binds) (match x it binds))
+   ((varsym? x) (values (cons (cons x y) binds) t))
+   ((varsym? y) (values (cons (cons y x) binds) t))
+   ((and (consp x) (consp y) (match (car x) (car y) binds))
+    (match (cdr x) (cdr y) it))
+   (t (values nil nil))))
+
+(defun var? (x)
+  (and (symbolp x) (eq (char (symbol-name x) 0) #\?)))
+
+(defun vars-in (expr &optional (atom? #'atom))
+  (if (funcall atom? expr)
+      (if (var? expr) (list expr))
+      (union (vars-in (car expr) atom?)
+             (vars-in (cdr expr) atom?))))
+
+(defmacro if-match (pat seq then &optional else)
+  `(aif2 (match ',pat ,seq)
+         (let ,(mapcar #'(lambda (v)
+                           `(,v (binding ',v it)))
+                       (vars-in then #'atom))
+           ,then)
+         ,else))
+
+(defun length-test (pat rest)
+  (let ((fin (caadar (last rest))))
+    (if (or (consp fin) (eq fin 'elt))
+        `(= (length ,pat) ,(length rest))
+        `(> (length ,pat) ,(- (length rest) 2)))))
+
+(defun gensym? (s)
+  (and (symbolp s) (not (symbol-package s))))
+
+(defun match1 (refs then else)
+  (dbind ((pat expr) . rest) refs
+         (cond ((gensym? pat)
+                `(let ((,pat ,expr))
+                   (if (and (typep ,pat 'sequence)
+                            ,(length-test pat rest))
+                       ,then
+                       ,else)))
+               ((eq pat '_) then)
+               ((var? pat)
+                (let ((ge (gensym)))
+                  `(let ((,ge ,expr))
+                     (if (or (gensym? ,pat) (equal ,pat ,ge))
+                         (let ((,pat ,ge)) ,then)
+                         ,else))))
+               (t `(if (equal ,pat ,expr) ,then ,else)))))
+
+(defun simple? (x) (or (atom x) (eq (car x) 'quote)))
+
+(defun gen-match (refs then else)
+  (if (null refs)
+      then
+      (let ((then (gen-match (cdr refs) then else)))
+        (if (simple? (caar refs))
+            (match1 refs then else)
+            (gen-match (car refs) then else)))))
+
+(defmacro pat-match (pat seq then else)
+  (if (simple? pat)
+      (match1 `((,pat ,seq)) then else)
+      (with-gensyms (gseq gelse)
+        `(labels ((,gelse () ,else))
+           ,(gen-match (cons (list gseq seq)
+                             (destruc pat gseq #'simple?))
+                       then
+                       `(,gelse))))))
+
+(defmacro if-match (pat seq then &optional else)
+  `(let ,(mapcar #'(lambda (v) `(,v ',(gensym)))
+                 (vars-in pat #'simple?))
+     (pat-match ,pat ,seq ,then ,else)))
+
