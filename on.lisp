@@ -1401,7 +1401,7 @@
     `(let ((,gseq ,seq))
        ,(dbind-ex (destruc pat gseq #'atom) body))))
 
-(defmacro with-matrix (pats ar &body body)
+(defmacro with-matrix (pats ar &body body);;数组上的解构
   (let ((gar (gensym)))
     `(let ((,gar ,ar))
        (let ,(let ((row -1))
@@ -1417,7 +1417,7 @@
                 pats))
          ,@body))))
 
-(defmacro with-array (pat ar &body body)
+(defmacro with-array (pat ar &body body);;稀疏表的解构
   (let ((gar (gensym)))
     `(let ((,gar ,ar))
        (let ,(mapcar #'(lambda (p)
@@ -1425,7 +1425,7 @@
               pat)
          ,@body))))
 
-(defmacro with-struct ((name . fields) struct &body body)
+(defmacro with-struct ((name . fields) struct &body body);;结构体上的解构
   (let ((gs (gensym)))
     `(let ((,gs ,struct))
        (let ,(mapcar #'(lambda (f)
@@ -1433,7 +1433,7 @@
               fields)
          ,@body))))
 
-(defun wplac-ex (binds body)
+(defun wplac-ex (binds body);;为解构宏创建出与之对应的按名调用版本
   (if (null binds)
       `(progn ,@body)
       `(symbol-macrolet ,(mapcar #'(lambda (b)
@@ -1447,12 +1447,12 @@
                             binds)
                     body))))
 
-(defmacro with-places (pat seq &body body)
+(defmacro with-places (pat seq &body body);;序列上的引用解构
   (let ((gseq (gensym)))
     `(let ((,gseq ,seq))
        ,(wplac-ex (destruc pat gseq #'atom) body))))
 
-(defun binding (x binds)
+(defun binding (x binds);;形成绑定列表
   (labels ((recbind (x binds)
              (aif (assoc x binds)
                   (or (recbind (cdr it) binds)
@@ -1460,10 +1460,10 @@
     (let ((b (recbind x binds)))
       (values (cdr b) b))))
 
-(defun varsym? (x)
+(defun varsym? (x);;判断是否为模式变量
   (and (symbolp x) (eq (char (symbol-name x) 0) #\?)))
 
-(defun match (x y &optional binds)
+(defun match (x y &optional binds);;逐个元素地比较它的参数，建立起来了一系列值和变量之间的赋值关系
   (acond2
    ((or (eql x y) (eql x '_) (eql y '_)) (values binds t))
    ((binding x binds) (match it y binds))
@@ -1474,16 +1474,16 @@
     (match (cdr x) (cdr y) it))
    (t (values nil nil))))
 
-(defun var? (x)
+(defun var? (x);;测试是否某个东西是一个变量
   (and (symbolp x) (eq (char (symbol-name x) 0) #\?)))
 
-(defun vars-in (expr &optional (atom? #'atom))
+(defun vars-in (expr &optional (atom? #'atom));;返回一个表达式中的所有匹配变量
   (if (funcall atom? expr)
       (if (var? expr) (list expr))
       (union (vars-in (car expr) atom?)
              (vars-in (cdr expr) atom?))))
 
-(defmacro if-match (pat seq then &optional else)
+(defmacro if-match (pat seq then &optional else);;慢的匹配操作符，通过比较模式跟序列来建立绑定
   `(aif2 (match ',pat ,seq)
          (let ,(mapcar #'(lambda (v)
                            `(,v (binding ',v it)))
@@ -1491,16 +1491,16 @@
            ,then)
          ,else))
 
-(defun length-test (pat rest)
+(defun length-test (pat rest);;测试是否具有正确的长度
   (let ((fin (caadar (last rest))))
     (if (or (consp fin) (eq fin 'elt))
         `(= (length ,pat) ,(length rest))
         `(> (length ,pat) ,(- (length rest) 2)))))
 
-(defun gensym? (s)
+(defun gensym? (s);;是否为gensym生成的符号
   (and (symbolp s) (not (symbol-package s))))
 
-(defun match1 (refs then else)
+(defun match1 (refs then else);;生成模式树上每个叶子的匹配代码
   (dbind ((pat expr) . rest) refs
          (cond ((gensym? pat)
                 `(let ((,pat ,expr))
@@ -1517,9 +1517,9 @@
                          ,else))))
                (t `(if (equal ,pat ,expr) ,then ,else)))))
 
-(defun simple? (x) (or (atom x) (eq (car x) 'quote)))
+(defun simple? (x) (or (atom x) (eq (car x) 'quote)));;定义模式内容和模式结构之间的差别
 
-(defun gen-match (refs then else)
+(defun gen-match (refs then else);;为嵌套的模式递归生成匹配代码传给match1
   (if (null refs)
       then
       (let ((then (gen-match (cdr refs) then else)))
@@ -1527,7 +1527,7 @@
             (match1 refs then else)
             (gen-match (car refs) then else)))))
 
-(defmacro pat-match (pat seq then else)
+(defmacro pat-match (pat seq then else);;完成展开工作，它不为模式变量建立任何新绑定
   (if (simple? pat)
       (match1 `((,pat ,seq)) then else)
       (with-gensyms (gseq gelse)
@@ -1538,59 +1538,59 @@
                        then
                        `(,gelse))))))
 
-(defmacro if-match (pat seq then &optional else)
+(defmacro if-match (pat seq then &optional else);;快速匹配操作符，不再创建变量绑定的列表，而是将变量的值保存进这些变量本身
   `(let ,(mapcar #'(lambda (v) `(,v ',(gensym)))
                  (vars-in pat #'simple?))
      (pat-match ,pat ,seq ,then ,else)))
 
-(defun make-db (&optional (size 100))
+(defun make-db (&optional (size 100));;创建一个数据库
   (make-hash-table :size size))
 
-(defvar *default-db* (make-db))
+(defvar *default-db* (make-db));;创建一个默认数据库
 
-(defun clear-db (&optional (db *default-db*))
+(defun clear-db (&optional (db *default-db*));;清除一个数据库
   (clrhash db))
 
-(defmacro db-query (key &optional (db '*default-db*))
+(defmacro db-query (key &optional (db '*default-db*));;数据库查询
   `(gethash ,key ,db))
 
-(defun db-push (key val &optional (db *default-db*))
+(defun db-push (key val &optional (db *default-db*));;插入新事实到数据库项中
   (push val (db-query key db)))
 
-(defmacro fact (pred &rest args)
+(defmacro fact (pred &rest args);;用来给数据库加入新事实
   `(progn (db-push ',pred ',args)
           ',args))
 
-(defun lookup (pred args &optional binds)
+(defun lookup (pred args &optional binds);;返回一个能够使模式匹配到数据库中某个事实的所有绑定的列表
   (mapcan #'(lambda (x)
               (aif2 (match x args binds) (list it)))
           (db-query pred)))
 
-(defun interpret-not (clause binds)
+(defun interpret-not (clause binds);;逻辑非过滤
   (if (interpret-query clause binds)
       nil
       (list binds)))
 
-(defun interpret-or (clauses binds)
+(defun interpret-or (clauses binds);;逻辑或过滤
   (mapcan #'(lambda (c)
               (interpret-query c binds))
           clauses))
 
-(defun interpret-and (clauses binds)
+(defun interpret-and (clauses binds);;逻辑与过滤
   (if (null clauses)
       (list binds)
       (mapcan #'(lambda (b)
                   (interpret-query (car clauses) b))
               (interpret-and (cdr clauses) binds))))
 
-(defun interpret-query (expr &optional binds)
+(defun interpret-query (expr &optional binds);;递归生成绑定
   (case (car expr)
     (and (interpret-and (reverse (cdr expr)) binds))
     (or (interpret-or (cdr expr) binds))
     (not (interpret-not (cadr expr) binds))
     (t (lookup (car expr) (cdr expr) binds))))
 
-(defmacro with-answer (query &body body)
+(defmacro with-answer (query &body body);;一个查询解释器
   (let ((binds (gensym)))
     `(dolist (,binds (interpret-query ',query))
        (let ,(mapcar #'(lambda (v)
@@ -1598,14 +1598,14 @@
                      (vars-in query #'atom))
          ,@body))))
 
-(defun compile-not (q body)
+(defun compile-not (q body);;逻辑非过滤
   (let ((tag (gensym)))
     `(if (block ,tag
            ,(compile-query q `(return-from ,tag nil))
            t)
          ,body)))
 
-(defun compile-or (clauses body)
+(defun compile-or (clauses body);;逻辑或过滤
   (if (null clauses)
       nil
       (let ((gbod (gensym))
@@ -1615,18 +1615,18 @@
                          (compile-query cl `(,gbod ,@vars)))
                      clauses)))))
 
-(defun compile-and (clauses body)
+(defun compile-and (clauses body);;逻辑与过滤
   (if (null clauses)
       body
       (compile-query (car clauses)
                      (compile-and (cdr clauses) body))))
 
-(defun compile-simple (q body)
+(defun compile-simple (q body);;没有逻辑过滤和表达式的情况
   (let ((fact (gensym)))
     `(dolist (,fact (db-query ',(car q)))
        (pat-match ,(cdr q) ,fact ,body nil))))
 
-(defun compile-query (q body)
+(defun compile-query (q body);;递归生成绑定，用变量来保存它们的值
   (case (car q)
     (and (compile-and (cdr q) body))
     (or (compile-or (cdr q) body))
@@ -1634,6 +1634,6 @@
     (lisp `(if ,(cadr q) ,body))
     (t (compile-simple q body))))
 
-(defmacro with-answer (query &body body)
+(defmacro with-answer (query &body body);;查询编译器
   `(with-gensyms ,(vars-in query #'simple?)
      ,(compile-query query `(progn ,@body))))
