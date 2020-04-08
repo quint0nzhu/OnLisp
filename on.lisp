@@ -1640,73 +1640,73 @@
      ,(compile-query query `(progn ,@body
                                    ))))
 
-(defvar *actual-cont* #'values)
+(defvar *actual-cont* #'values);;续延的用场
 
-(define-symbol-macro *cont*
+(define-symbol-macro *cont*;;被绑定到当前的续延
   *actual-cont*)
 
-(defmacro =lambda (parms &body body)
+(defmacro =lambda (parms &body body);;lambda续延传递宏
   `#'(lambda (*cont* ,@parms) ,@body))
 
-(defmacro =defun (name parms &body body)
+(defmacro =defun (name parms &body body);;defun续延传递宏
   (let ((f (intern (concatenate 'string "=" (symbol-name name)))))
     `(progn
        (defmacro ,name ,parms
          `(,' ,f *cont* ,,@parms))
        (defun ,f (*cont* ,@parms) ,@body))))
 
-(defmacro =bind (parms expr &body body)
+(defmacro =bind (parms expr &body body);;bind续延传递宏
   `(let ((*cont* #'(lambda ,parms ,@body))) ,expr))
 
-(defmacro =values (&rest retvals)
+(defmacro =values (&rest retvals);;values续延传递宏
   `(funcall *cont* ,@retvals))
 
-(defmacro =apply (fn &rest args)
+(defmacro =apply (fn &rest args);;apply续延传递宏
   `(apply ,fn *cont* ,@args))
 
-(defmacro =funcall (fn &rest args)
+(defmacro =funcall (fn &rest args);;funcall续延传递宏
   `(funcall ,fn *cont* ,@args))
 
-(defun dft (tree)
+(defun dft (tree);;使用续延传递宏的树遍历
   (cond ((null tree) nil)
         ((atom tree) (princ tree))
         (t (dft (car tree))
            (dft (cdr tree)))))
 
-(defvar *saved* nil)
+(defvar *saved* nil);;保存已经续延的节点
 
-(=defun re-start ()
+(=defun re-start ();;弹出最近保存的续延并调用它继续遍历
   (if *saved*
       (funcall (pop *saved*))
       (=values 'done)))
 
-(=defun dft-node (tree)
+(=defun dft-node (tree);;遍历出一个节点
   (cond ((null tree) (re-start))
         ((atom tree) (=values tree))
         (t (push #'(lambda () (dft-node (cdr tree)))
                  *saved*)
            (dft-node (car tree)))))
 
-(=defun dft2 (tree)
+(=defun dft2 (tree);;无显式的递归或迭代的遍历
   (setq *saved* nil)
   (=bind (node) (dft-node tree)
     (cond ((eq node 'done) (=values nil))
           (t (princ node)
              (re-start)))))
 
-(defstruct proc pri state wait)
+(defstruct proc pri state wait);;定义进程结构
 
-(proclaim '(special *procs* *proc*))
+(proclaim '(special *procs* *proc*));;声明全局变量
 
-(defvar *halt* (gensym))
+(defvar *halt* (gensym));;定义停机变量
 
-(defvar *default-proc*
+(defvar *default-proc*;;默认进程
   (make-proc :state #'(lambda (x)
                         (format t "~%>> ")
                         (princ (eval (read)))
                         (pick-process))))
 
-(defmacro fork (expr pri)
+(defmacro fork (expr pri);;使用一个函数调用来实例化进程
   `(prog1 ',expr
      (push (make-proc
             :state #'(lambda (,(gensym))
@@ -1715,19 +1715,19 @@
             :pri ,pri)
            *procs*)))
 
-(defmacro program (name args &body body)
+(defmacro program (name args &body body);;创建一组进程并一起执行它们
   `(=defun ,name ,args
            (setq *procs* nil)
            ,@body
            (catch *halt* (loop (pick-process)))))
 
-(defun pick-process ()
+(defun pick-process ();;在可以继续执行的进程中选出一个优先级最高的进程执行
   (multiple-value-bind (p val) (most-urgent-process)
     (setq *proc* p
           *procs* (delete p *procs*))
     (funcall (proc-state p) val)))
 
-(defun most-urgent-process ()
+(defun most-urgent-process ();;找出优先级最高的进程
   (let ((proc1 *default-proc*) (max -1) (val1 t))
     (dolist (p *procs*)
       (let ((pri (proc-pri p)))
@@ -1740,46 +1740,46 @@
                       val1 val))))))
     (values proc1 val1)))
 
-(defun arbitrator (test cont)
+(defun arbitrator (test cont);;保存当前进程，然后调用pick-process来再次执行某个进程
   (setf (proc-state *proc*) cont
         (proc-wait *proc*) test)
   (push *proc* *procs*)
   (pick-process))
 
-(defmacro wait (parm test &body body)
+(defmacro wait (parm test &body body);;测试等待
   `(arbitrator #'(lambda () ,test)
                #'(lambda (,parm) ,@body)))
 
-(defmacro yield (&body body)
+(defmacro yield (&body body);;交出进程运行的权利，调度另一个高优先级进程运行
   `(arbitrator nil #'(lambda (,(gensym)) ,@body)))
 
-(defun setpri (n) (setf (proc-pri *proc*) n))
+(defun setpri (n) (setf (proc-pri *proc*) n));;设置进程优先级
 
-(defun halt (&optional val) (throw *halt* val))
+(defun halt (&optional val) (throw *halt* val));;停机
 
-(defun kill (&optional obj &rest args)
+(defun kill (&optional obj &rest args);;杀死一个进程
   (if obj
       (setq *procs* (apply #'delete obj *procs* args))
       (pick-process)))
 
-(defvar *open-doors* nil)
+(defvar *open-doors* nil);;全局门变量
 
-(=defun pedestrian ()
+(=defun pedestrian ();;等待挂起
         (wait d (car *open-doors*)
               (format t "Entering ~A~%" d)))
 
-(program ped ()
+(program ped ();;生成一个进程
          (fork (pedestrian) 1))
 
-(defvar *bboard* nil)
+(defvar *bboard* nil);;全局黑板变理
 
-(defun claim (&rest f) (push f *bboard*))
+(defun claim (&rest f) (push f *bboard*));;宣称获得黑板使用权
 
-(defun unclaim (&rest f) (pull f *bboard* :test #'equal))
+(defun unclaim (&rest f) (pull f *bboard* :test #'equal));;释放黑板
 
-(defun check (&rest f) (find f *bboard* :test #'equal))
+(defun check (&rest f) (find f *bboard* :test #'equal));;判断是否已经在使用黑板
 
-(=defun visitor (door)
+(=defun visitor (door);;访问门
         (format t "Approach ~A. " door)
         (claim 'knock door)
         (wait d (check 'open door)
@@ -1787,7 +1787,7 @@
               (unclaim 'knock door)
               (claim 'inside door)))
 
-(=defun host (door)
+(=defun host (door);;试图获得门
         (wait k (check 'knock door)
               (format t "Open ~A. " door)
               (claim 'open door)
@@ -1795,39 +1795,39 @@
                     (format t "Close ~A.~%" door)
                     (unclaim 'open door))))
 
-(program ballet ()
+(program ballet ();;起动一批进程
          (fork (visitor 'door1) 1)
          (fork (host 'door1) 1)
          (fork (visitor 'door2) 1)
          (fork (host 'door2) 1))
 
-(=defun capture (city)
+(=defun capture (city);;先要占领
         (take city)
         (setpri 1)
         (yield
          (fortify city)))
 
-(=defun plunder (city)
+(=defun plunder (city);;然后才能掠夺
         (loot city)
         (ransom city))
 
-(defun take (c) (format t "Liberating ~A.~%" c))
+(defun take (c) (format t "Liberating ~A.~%" c));;解放
 
-(defun fortify (c) (format t "Rebuilding ~A.~%" c))
+(defun fortify (c) (format t "Rebuilding ~A.~%" c));;重建
 
-(defun loot (c) (format t "Nationalizing ~A.~%" c))
+(defun loot (c) (format t "Nationalizing ~A.~%" c));;国有化
 
-(defun ransom (c) (format t "Refinancing ~A.~%" c))
+(defun ransom (c) (format t "Refinancing ~A.~%" c));;再融资
 
-(program barbarians ()
+(program barbarians ();;启动对罗马的占领和掠夺
          (fork (capture 'rome) 100)
          (fork (plunder 'rome) 98))
 
-(defparameter *paths* nil)
+(defparameter *paths* nil);;定义路径全局变理
 
-(defconstant failsym '@)
+(defconstant failsym '@);;定义失败标记符
 
-(defmacro choose (&rest choices)
+(defmacro choose (&rest choices);;选择下一步的路径
   (if choices
       `(progn
          ,@(mapcar #'(lambda (c)
@@ -1836,10 +1836,10 @@
          ,(car choices))
       '(fail)))
 
-(defmacro choose-bind (var choices &body body)
+(defmacro choose-bind (var choices &body body);;选择后，把选中的值绑定到符号上，再对代码体求值
   `(cb #'(lambda (,var) ,@body) ,choices))
 
-(defun cb (fn choices)
+(defun cb (fn choices);;上面宏的实际执行函数
   (if choices
       (progn
         (if (cdr choices)
@@ -1848,32 +1848,32 @@
         (funcall fn (car choices)))
       (fail)))
 
-(defun fail ()
+(defun fail ();;如果路径中还有节点可以调用就调用重启计算，否则就返回一个特殊值
   (if *paths*
       (funcall (pop *paths*))
       failsym))
 
-(=defun two-numbers ()
+(=defun two-numbers ();;非确定性帮助选择出两个数字，并把它们作为一个列表返回
   (choose-bind n1 '(0 1 2 3 4 5)
     (choose-bind n2 '(0 1 2 3 4 5)
       (=values n1 n2))))
 
-(=defun parlor-trick (sum)
+(=defun parlor-trick (sum);;给出一个数sum，或得如何由两个数加起来得到它的方法
   (=bind (n1 n2) (two-numbers)
     (if (= (+ n1 n2) sum)
         `(the sum of ,n1 ,n2)
         (fail))))
 
-(defparameter *sent* nil)
+(defparameter *sent* nil);;被分析的句子被放到全局变量中
 
-(defmacro defnode (name &rest arcs)
+(defmacro defnode (name &rest arcs);;定义节点，定义了一个宏，宏的名字和对应的节点相同
   `(=defun ,name (pos regs) (choose ,@arcs)))
 
-(defmacro down (sub next &rest cmds)
+(defmacro down (sub next &rest cmds);;定义push弧
   `(=bind (* pos regs) (,sub pos (cons nil regs))
      (,next pos ,(compile-cmds cmds))))
 
-(defmacro cat (cat next &rest cmds)
+(defmacro cat (cat next &rest cmds);;定义cat弧
   `(if (= (length *sent*) pos)
        (fail)
        (let ((* (nth pos *sent*)))
@@ -1881,49 +1881,49 @@
              (,next (1+ pos) ,(compile-cmds cmds))
              (fail)))))
 
-(defmacro jump (next &rest cmds)
+(defmacro jump (next &rest cmds);;定义jump弧
   `(,next pos ,(compile-cmds cmds)))
 
-(defun compile-cmds (cmds)
+(defun compile-cmds (cmds);;编译命令，把几类转移弧的展开函数会把一系列setr串在一起
   (if (null cmds)
       'regs
       `(,@(car cmds) ,(compile-cmds (cdr cmds)))))
 
-(defmacro up (expr)
+(defmacro up (expr);;定义pop弧
   `(let ((* (nth pos *sent*)))
      (=values ,expr pos (cdr regs))))
 
-(defmacro getr (key &optional (regs 'regs))
+(defmacro getr (key &optional (regs 'regs));;读一个寄存器
   `(let ((result (cdr (assoc ',key (car ,regs)))))
      (if (cdr result) result (car result))))
 
-(defmacro set-register (key val regs)
+(defmacro set-register (key val regs);;基本的寄存器操作
   `(cons (cons (cons ,key ,val) (car ,regs))
          (cdr ,regs)))
 
-(defmacro setr (key val regs)
+(defmacro setr (key val regs);;设置寄存器
   `(set-register ',key (list ,val) ,regs))
 
-(defmacro pushr (key val regs)
+(defmacro pushr (key val regs);;把一个值加入寄存器
   `(set-register ',key
                  (cons ,val (cdr (assoc ',key (car ,regs))))
                  ,regs))
 
-(defnode s
+(defnode s;;一个微型的ATN
     (cat noun s2
          (setr subj *)))
 
-(defnode s2
+(defnode s2;;一个微型的ATN
     (cat verb s3
          (setr v *)))
 
-(defnode s3
+(defnode s3;;一个微型的ATN
     (up `(sentence (subject ,(getr subj)) (verb ,(getr v)))))
 
-(defun types (w)
+(defun types (w);;一个微型的ATN的象征性词典
   (cdr (assoc w '((spot noun) (runs verb)))))
 
-(defun types (word)
+(defun types (word);;象征性的词典
   (case word
     ((do does did) '(aux v))
     ((time times) '(n v))
@@ -1934,16 +1934,16 @@
     ((arrow arrows) '(n))
     ((i you he she him her it) '(pron))))
 
-(defnode mods
+(defnode mods;;修饰词字符串的子网络
     (cat n mods/n
          (setr mods *)))
 
-(defnode mods/n
+(defnode mods/n;;修饰词字符串的子网络
     (cat n mods/n
          (pushr mods *))
   (up `(n-group ,(getr mods))))
 
-(defnode np
+(defnode np;;名词短语子网络
     (cat det np/det
          (setr det *))
   (jump np/det
@@ -1951,45 +1951,45 @@
   (cat pron pron
        (setr n *)))
 
-(defnode pron
+(defnode pron;;名词短语子网络
     (up `(np (pronoun ,(getr n)))))
 
-(defnode np/det
+(defnode np/det;;名词短语子网络
     (down mods np/mods
           (setr mods *))
   (jump np/mods
         (setr mods nil)))
 
-(defnode np/mods
+(defnode np/mods;;名词短语子网络
     (cat n np/n
          (setr n *)))
 
-(defnode np/n
+(defnode np/n;;名词短语子网络
     (up `(np (det ,(getr det))
              (modifiers ,(getr mods))
              (noun ,(getr n))))
   (down pp np/pp
         (setr pp *)))
 
-(defnode np/pp
+(defnode np/pp;;名词短语子网络
     (up `(np (det ,(getr det))
              (modifiers ,(getr mods))
              (noun ,(getr n))
              ,(getr pp))))
 
-(defnode pp
+(defnode pp;;介词短语子网络
     (cat prep pp/prep
          (setr prep *)))
 
-(defnode pp/prep
+(defnode pp/prep;;介词短语子网络
     (down np pp/np
           (setr op *)))
 
-(defnode pp/np
+(defnode pp/np;;介词短语子网络
     (up `(pp (prep ,(getr prep))
              (obj ,(getr op)))))
 
-(defnode s
+(defnode s;;句子网络
     (down np s/subj
           (setr mood 'decl)
           (setr subj *))
@@ -1999,12 +1999,12 @@
        (setr aux nil)
        (setr v *)))
 
-(defnode s/subj
+(defnode s/subj;;句子网络
     (cat v v
          (setr aux nil)
          (setr v *)))
 
-(defnode v
+(defnode v;;句子网络
     (up `(s (mood ,(getr mood))
             (subj ,(getr subj))
             (vcl (aux ,(getr aux))
@@ -2012,14 +2012,14 @@
   (down np s/obj
         (setr obj *)))
 
-(defnode s/obj
+(defnode s/obj;;句子网络
     (up `(s (mood ,(getr mood))
             (subj ,(getr subj))
             (vcl (aux ,(getr aux))
                  (v ,(getr v)))
             (obj ,(getr obj)))))
 
-(defmacro with-parses (node sent &body body)
+(defmacro with-parses (node sent &body body);;toplevel宏，可以用来调用ATN
   (with-gensyms (pos regs)
     `(progn
        (setq *sent* ,sent)
@@ -2029,7 +2029,7 @@
              (progn ,@body (fail))
              (fail))))))
 
-(defmacro with-inference (query &body body)
+(defmacro with-inference (query &body body);;Prolog解释器的接口宏
   `(progn
      (setq *paths* nil)
      (=bind (binds) (prove-query ',(rep_ query) nil)
@@ -2039,12 +2039,12 @@
               ,@body
               (fail)))))
 
-(defun rep_ (x)
+(defun rep_ (x);;_用作规则里的通配符变理，把每个下划线都替换成真正的变量
   (if (atom x)
       (if (eq x '_) (gensym "?") x)
       (cons (rep_ (car x)) (rep_ (cdr x)))))
 
-(defun fullbind (x b)
+(defun fullbind (x b);;沿着规则往回跟踪，可以建立一系列绑定
   (cond ((varsym? x) (aif2 (binding x b)
                            (fullbind it b)
                            (gensym)))
@@ -2052,27 +2052,27 @@
         (t (cons (fullbind (car x) b)
                  (fullbind (cdr x) b)))))
 
-(defun varsym? (x)
+(defun varsym? (x);;是否为模式变量
   (and (symbolp x) (eq (char (symbol-name x) 0) #\?)))
 
-(=defun prove-query (expr binds)
+(=defun prove-query (expr binds);;查询语句的解释
   (case (car expr)
     (and (prove-and (cdr expr) binds))
     (or (prove-or (cdr expr) binds))
     (not (prove-not (cadr expr) binds))
     (t (prove-simple expr binds))))
 
-(=defun prove-and (clauses binds)
+(=defun prove-and (clauses binds);;与条件查询
   (if (null clauses)
       (=values binds)
       (=bind (binds) (prove-query (car clauses) binds)
         (prove-and (cdr clauses) binds))))
 
-(=defun prove-or (clauses binds)
+(=defun prove-or (clauses binds);;或条件查询
   (choose-bind c clauses
     (prove-query c binds)))
 
-(=defun prove-not (expr binds)
+(=defun prove-not (expr binds);;非条件查询
   (let ((save-paths *paths*))
     (setq *paths* nil)
     (choose (=bind (b) (prove-query expr binds)
@@ -2082,25 +2082,25 @@
               (setq *paths* save-paths)
               (=values binds)))))
 
-(=defun prove-simple (query binds)
+(=defun prove-simple (query binds);;简单条件查询
   (choose-bind r *rlist*
     (implies r query binds)))
 
-(defvar *rlist* nil)
+(defvar *rlist* nil);;保存规则列表
 
-(defmacro <- (con &rest ant)
+(defmacro <- (con &rest ant);;规则定义宏
   (let ((ant (if (= (length ant) 1)
                  (car ant)
                  `(and ,@ant))))
     `(length (conc1f *rlist* (rep_ (cons ',ant ',con))))))
 
-(=defun implies (r query binds)
+(=defun implies (r query binds);;调用prove-query，让它帮助为body建立绑定
   (let ((r2 (change-vars r)))
     (aif2 (match query (cdr r2) binds)
           (prove-query (car r2) it)
           (fail))))
 
-(defun change-vars (r)
+(defun change-vars (r);;避免现有绑定之间发生冲突
   (sublis (mapcar #'(lambda (v)
                       (cons v (symb '? (gensym))))
                   (vars-in r #'atom))
