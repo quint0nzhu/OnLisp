@@ -1015,9 +1015,9 @@
                ,(car (last syms))))))
       `(nth ,n (sort (copy-list ,lst) #'>))))
 
-(defconstant *segs* 20)
-(defconstant *du* (/ 1.0 *segs*))
-(defconstant *pts* (make-array (list (1+ *segs*) 2)))
+(defconstant *segs* 20);;段
+(defconstant *du* (/ 1.0 *segs*));;段的倒数
+(defconstant *pts* (make-array (list (1+ *segs*) 2)));;点
 
 (defmacro genbez (x0 y0 x1 y1 x2 y2 x3 y3);;生成贝塞尔曲线的宏
   (with-gensyms (gx0 gx1 gy0 gy1 gx3 gy3)
@@ -1332,7 +1332,7 @@
 ;;                         (declare (ignore char))
 ;;                         (list 'quote (read stream t nil t))))
 
-(set-dispatch-macro-character #\# #\?;;一个用于常委函数的读取宏
+(set-dispatch-macro-character #\# #\?;;一个用于常数函数的读取宏
                               #'(lambda (stream char1 char2)
                                   (declare (ignore char1 char2))
                                   `#'(lambda (&rest ,(gensym))
@@ -2106,7 +2106,7 @@
                   (vars-in r #'atom))
           r))
 
-(defmacro with-inference (query &rest body)
+(defmacro with-inference (query &rest body);;新的Prolog编译器的接口宏，利用编译期的已知信息，在运行期做更少的事情
   (let ((vars (vars-in query #'simple?)) (gb (gensym)))
     `(with-gensyms ,vars
        (setq *paths* nil)
@@ -2117,10 +2117,11 @@
            ,@body)
          (fail)))))
 
-(defun varsym? (x)
+
+(defun varsym? (x);;判别变量的函数
   (and (symbolp x) (not (symbol-package x))))
 
-(defun gen-query (expr &optional binds)
+(defun gen-query (expr &optional binds);;生成一部分代码，这些代码将为查询建立绑定
   (case (car expr)
     (and (gen-and (cdr expr) binds))
     (or (gen-or (cdr expr) binds))
@@ -2129,19 +2130,19 @@
                      ,@(mapcar #'form (cdr expr)))
                ,binds))))
 
-(defun gen-and (clauses binds)
+(defun gen-and (clauses binds);;条件与操作符结合起来的查询
   (if (null clauses)
       `(=values ,binds)
       (let ((gb (gensym)))
         `(=bind (,gb) ,(gen-query (car clauses) binds)
           ,(gen-and (cdr clauses) gb)))))
 
-(defun gen-or (clauses binds)
+(defun gen-or (clauses binds);;条件或操作符结合起来的查询
   `(choose
     ,@(mapcar #'(lambda (c) (gen-query c binds))
               clauses)))
 
-(defun gen-not (expr binds)
+(defun gen-not (expr binds);;条件非操作符结合起来的查询
   (let ((gpaths (gensym)))
     `(let ((,gpaths *paths*))
        (setq *paths* nil)
@@ -2152,24 +2153,24 @@
                  (setq *paths* ,gpaths)
                  (=values ,binds))))))
 
-(defvar *rules* nil)
+(defvar *rules* nil);;保存规则的全局变量
 
-(=defun prove (query binds)
+(=defun prove (query binds);;在运行期间被调用
   (choose-bind r *rules* (=funcall r query binds)))
 
-(defun form (pat)
+(defun form (pat);;生成求值对象
   (if (simple? pat)
       pat
       `(cons ,(form (car pat)) ,(form (cdr pat)))))
 
-(defmacro <- (con &rest ant)
+(defmacro <- (con &rest ant);;新的规则生成器
   (let ((ant (if (= (length ant) 1)
                  (car ant)
                  `(and ,@ant))))
     `(length (conc1f *rules*
                      ,(rule-fn (rep_ ant) (rep_ con))))))
 
-(defun rule-fn (ant con)
+(defun rule-fn (ant con);;将规则转换为Lisp代码
   (with-gensyms (val win fact binds)
     `(=lambda (,fact ,binds)
        (with-gensyms ,(vars-in (list ant con) #'simple?)
@@ -2183,7 +2184,7 @@
                ,(gen-query ant val)
                (fail)))))))
 
-(defun rule-fn (ant con)
+(defun rule-fn (ant con);;加入剪枝的规则生成器
   (with-gensyms (val win fact binds paths)
     `(=lambda (,fact ,binds ,paths)
        (with-gensyms ,(vars-in (list ant con) #'simple?)
@@ -2197,7 +2198,7 @@
                ,(gen-query ant val paths)
                (fail)))))))
 
-(defmacro with-inference (query &rest body)
+(defmacro with-inference (query &rest body);;加入剪枝的Prolog编译器的宏
   (let ((vars (vars-in query #'simple?)) (gb (gensym)))
     `(with-gensyms ,vars
        (setq *paths* nil)
@@ -2208,7 +2209,7 @@
            ,@body)
          (fail)))))
 
-(defun gen-query (expr binds paths)
+(defun gen-query (expr binds paths);;加入了对新操作符的支持
   (case (car expr)
     (and (gen-and (cdr expr) binds paths))
     (or (gen-or (cdr expr) binds paths))
@@ -2221,23 +2222,23 @@
                      ,@(mapcar #'form (cdr expr)))
                ,binds *paths*))))
 
-(=defun prove (query binds paths)
+(=defun prove (query binds paths);;加入了对新操作符的支持
   (choose-bind r *rules*
     (=funcall r query binds paths)))
 
-(defun gen-and (clauses binds paths)
+(defun gen-and (clauses binds paths);;加入了对新操作符的支持
   (if (null clauses)
       `(=values ,binds)
       (let ((gb (gensym)))
         `(=bind (,gb) ,(gen-query (car clauses) binds paths)
            ,(gen-and (cdr clauses) gb paths)))))
 
-(defun gen-or (clauses binds paths)
+(defun gen-or (clauses binds paths);;加入了对新操作符的支持
   `(choose
     ,@(mapcar #'(lambda (c) (gen-query c binds paths))
               clauses)))
 
-(defun gen-not (expr binds paths)
+(defun gen-not (expr binds paths);;加入了对新操作符的支持
   (let ((gpaths (gensym)))
     `(let ((,gpaths *paths*))
        (setq *paths* nil)
@@ -2248,22 +2249,22 @@
                  (setq *paths* ,gpaths)
                  (=values ,binds))))))
 
-(defmacro with-binds (binds expr)
+(defmacro with-binds (binds expr);;绑定代码
   `(let ,(mapcar #'(lambda (v) `(,v (fullbind ,v ,binds)))
                  (vars-in expr))
      ,expr))
 
-(defun gen-lisp (expr binds)
+(defun gen-lisp (expr binds);;生成Lisp代码
   `(if (with-binds ,binds ,expr)
        (=values ,binds)
        (fail)))
 
-(defun gen-is (expr1 expr2 binds)
+(defun gen-is (expr1 expr2 binds);;生成is操作符代码
   `(aif2 (match ,expr1 (with-binds ,binds ,expr2) ,binds)
          (=values it)
          (fail)))
 
-(defun some2 (fn lst)
+(defun some2 (fn lst);;some的修改版，适用于gethash这类用第二个返回值表示成功或失败的函数
   (if (atom lst)
       nil
       (multiple-value-bind (val win) (funcall fn (car lst))
@@ -2271,11 +2272,11 @@
             (values val win)
             (some2 fn (cdr lst))))))
 
-(defun rget (obj prop)
+(defun rget (obj prop);;找到第一个具有期望属性的对象
   (some2 #'(lambda (a) (gethash prop a))
          (get-ancestors obj)))
 
-(defun get-ancestors (obj)
+(defun get-ancestors (obj);;返回一个列表，由原始对象的所有祖先构成包括自身
   (labels ((getall (x)
              (append (list x)
                      (mapcan #'getall
@@ -2284,21 +2285,21 @@
                  #'(lambda (x y)
                      (member y (gethash 'parents x))))))
 
-(defun obj (&rest parents)
+(defun obj (&rest parents);;用于生成新的对象，对象的祖先列表被保存承对象本身里
   (let ((obj (make-hash-table)))
     (setf (gethash 'parents obj) parents)
     (ancestors obj)
     obj))
 
-(defun ancestors (obj)
+(defun ancestors (obj);;是否为祖先
   (or (gethash 'ancestors obj)
       (setf (gethash 'ancestors obj) (get-ancestors obj))))
 
-(defun rget (obj prop)
+(defun rget (obj prop);;为了用上保存的祖先列表，重新定义rget
   (some2 #'(lambda (a) (gethash prop a))
          (ancestors obj)))
 
-(defmacro defprop (name &optional meth?)
+(defmacro defprop (name &optional meth?);;定义属性的函数式的语法
   `(progn
      (defun ,name (obj &rest args)
        ,(if meth?
@@ -2307,21 +2308,21 @@
      (defsetf ,name (obj) (val)
        `(setf (gethash ', ',name ,obj) ,val))))
 
-(defun run-methods (obj name args)
+(defun run-methods (obj name args);;运行方法的函数式的语法
   (let ((meth (rget obj name)))
     (if meth
         (apply meth obj args)
         (error "No ~A method for ~A." name obj))))
 
-(defstruct meth around before primary after)
+(defstruct meth around before primary after);;方法结构体的四个成员
 
-(defmacro meth- (field obj)
+(defmacro meth- (field obj);;是否为方法域
   (let ((gobj (gensym)))
     `(let ((,gobj ,obj))
        (and (meth-p ,gobj)
             (,(symb 'meth- field) ,gobj)))))
 
-(defun run-methods (obj name args)
+(defun run-methods (obj name args);;增加了对运行辅助方法的支持
   (let ((pri (rget obj name :primary)))
     (if pri
         (let ((ar (rget obj name :around)))
@@ -2330,14 +2331,14 @@
               (run-core-methods obj name args pri)))
         (error "No primary ~A method for ~A." name obj))))
 
-(defun run-core-methods (obj name args &optional pri)
+(defun run-core-methods (obj name args &optional pri);;运行核心方法
   (multiple-value-prog1
       (progn (run-befores obj name args)
              (apply (or pri (rget obj name :primary))
                     obj args))
     (run-afters obj name args)))
 
-(defun rget (obj prop &optional meth (skip 0))
+(defun rget (obj prop &optional meth (skip 0));;增加了对运行辅助方法的支持
   (some2 #'(lambda (a)
              (multiple-value-bind (val win) (gethash prop a)
                (if win
@@ -2346,12 +2347,12 @@
                          (t (values val win))))))
          (nthcdr skip (ancestors obj))))
 
-(defun run-befores (obj prop args)
+(defun run-befores (obj prop args);;运行主方法之前先运行
   (dolist (a (ancestors obj))
     (let ((bm (meth- before (gethash prop a))))
       (if bm (apply bm obj args)))))
 
-(defun run-afters (obj prop args)
+(defun run-afters (obj prop args);;运行完主方法之后运行
   (labels ((rec (lst)
              (when lst
                (rec (cdr lst))
@@ -2360,7 +2361,7 @@
                  (if am (apply am (car lst) args))))))
     (rec (ancestors obj))))
 
-(defmacro defmeth ((name &optional (type :primary))
+(defmacro defmeth ((name &optional (type :primary));;帮助定义方法的宏
                    obj parms &body body)
   (let ((gobj (gensym)))
     `(let ((,gobj ,obj))
@@ -2370,7 +2371,7 @@
        (setf (,(symb 'meth- type) (gethash ',name ,gobj))
              ,(build-meth name type gobj parms body)))))
 
-(defun build-meth (name type gobj parms body)
+(defun build-meth (name type gobj parms body);;帮助生成方法的函数
   (let ((gargs (gensym)))
     `#'(lambda (&rest ,gargs)
          (labels
@@ -2389,7 +2390,7 @@
                    (t nil))))
            (apply #'(lambda ,parms ,@body) ,gargs)))))
 
-(defun cnm (obj name args type)
+(defun cnm (obj name args type);;调用下一个可调用的方法
   (case type
     (:around (let ((ar (rget obj name :around 1)))
                (if ar
@@ -2400,17 +2401,17 @@
                     (apply pri obj args)
                     (error "No next method."))))))
 
-(defmacro undefmeth ((name &optional (type :primary)) obj)
+(defmacro undefmeth ((name &optional (type :primary)) obj);;去掉一个对象的方法
   `(setf (,(symb 'meth- type) (gethash ',name ,obj))
          nil))
 
-(defmacro children (obj)
+(defmacro children (obj);;获得对象的孩子
   `(gethash 'children ,obj))
 
-(defun parents (obj)
+(defun parents (obj);;获得对象的父亲
   (gethash 'parents obj))
 
-(defun set-parents (obj pars)
+(defun set-parents (obj pars);;设置对象的父亲
   (dolist (p (parents obj))
     (setf (children p)
           (delete obj (children p))))
@@ -2423,19 +2424,19 @@
            obj)
   pars)
 
-(defsetf parents set-parents)
+(defsetf parents set-parents);;parents的逆操作
 
-(defun maphier (fn obj)
+(defun maphier (fn obj);;这个函数相当于继承树里的mapc
   (funcall fn obj)
   (dolist (c (children obj))
     (maphier fn c)))
 
-(defun obj (&rest parents)
+(defun obj (&rest parents);;重新定义以维护父类和子类的联系
   (let ((obj (make-hash-table)))
     (setf (parents obj) parents)
     obj))
 
-(defmacro defcomb (name op)
+(defmacro defcomb (name op);;定义方法的组合形式
   `(progn
      (defprop ,name t)
      (setf (get ',name 'mcombine)
@@ -2445,7 +2446,7 @@
                            (car (last args))))
               (t op)))))
 
-(defun run-core-methods (obj name args &optional pri)
+(defun run-core-methods (obj name args &optional pri);;把方法组合在一起使用
   (let ((comb (get name 'mcombine)))
     (if comb
         (if (symbolp comb)
@@ -2459,7 +2460,7 @@
                           obj args))
           (run-afters obj name args)))))
 
-(defun comb-normal (comb obj name args)
+(defun comb-normal (comb obj name args);;默认的方法调用
   (apply comb
          (mapcan #'(lambda (a)
                      (let* ((pm (meth- primary
@@ -2469,7 +2470,7 @@
                        (if val (list val))))
                  (ancestors obj))))
 
-(defun comb-and (obj name args ancs &optional (last t))
+(defun comb-and (obj name args ancs &optional (last t));;与组合调用
   (if (null ancs)
       last
       (let ((pm (meth- primary (gethash name (car ancs)))))
@@ -2479,18 +2480,18 @@
                    (comb-and obj name args (cdr ancs) new)))
             (comb-and obj name args (cdr ancs) last)))))
 
-(defun comb-or (obj name args ancs)
+(defun comb-or (obj name args ancs);;或组合调用
   (and ancs
        (let ((pm (meth- primary (gethash name (car ancs)))))
          (or (and pm (apply pm obj args))
              (comb-or obj name args (cdr ancs))))))
 
-(defmacro undefmethod (name &rest args)
+(defmacro undefmethod (name &rest args);;用于删除方法的宏，记录了手动删除一个方法的具体细节
   (if (consp (car args))
       (udm name nil (car args))
       (udm name (list (car args)) (cadr args))))
 
-(defun udm (name qual specs)
+(defun udm (name qual specs);;具体删除方法的函数
   (let ((classes (mapcar #'(lambda (s)
                              `(find-class ',s))
                          specs)))
